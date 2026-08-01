@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 
-#include "floral/stream/topology/DisplayTopologyStateService.h"
+#include "floral/device/display/topology/DisplayTopologyStateService.h"
 
-#include <aidl/floral/display/topology/PhysicalDisplaySpec.h>
+#include <aidl/floral/device/display/topology/PhysicalDisplaySpec.h>
 
 #include <algorithm>
 #include <limits>
 #include <unordered_set>
 #include <utility>
 
-namespace floral::stream::topology {
+namespace floral::device::display::topology {
 namespace {
 
 constexpr uint64_t kPrimaryDisplayId = 1;
@@ -246,4 +246,4 @@ void DisplayTopologyStateService::NotifyListeners(
     }
 }
 
-}  // namespace floral::stream::topology
+}  // namespace floral::device::display::topology

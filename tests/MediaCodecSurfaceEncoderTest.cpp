@@ -40,7 +40,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-constexpr char kOutputPath[] = "/data/local/tmp/floral-stream-codec-test.h264";
+constexpr char kOutputPath[] = "/data/local/tmp/floral-device-codec-test.h264";
 
 bool ContainsAnnexBNalType(const std::vector<uint8_t>& data, uint8_t expectedType) {
     for (size_t index = 0; index + 4 < data.size(); ++index) {

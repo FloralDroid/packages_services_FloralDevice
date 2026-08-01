@@ -1,7 +1,0 @@
-service vendor.floral-stream /vendor/bin/hw/floral_stream_service
-    class hal
-    user system
-    group system graphics media
-    priority -10
-    writepid /dev/cpuset/system-background/tasks
-    shutdown critical

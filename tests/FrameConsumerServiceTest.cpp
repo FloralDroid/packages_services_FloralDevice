@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "floral/stream/display/FrameConsumerService.h"
+#include "floral/device/display/FrameConsumerService.h"
 
 #include <aidl/android/hardware/graphics/common/BufferUsage.h>
 #include <aidl/android/hardware/graphics/common/PixelFormat.h>
@@ -28,11 +28,11 @@
 #include <memory>
 #include <utility>
 
-namespace floral::stream::display {
+namespace floral::device::display {
 namespace {
 
 using AidlBufferUsage = aidl::android::hardware::graphics::common::BufferUsage;
-using AidlFrameStatus = aidl::floral::stream::display::FrameStatus;
+using AidlFrameStatus = aidl::floral::device::display::FrameStatus;
 using AidlPixelFormat = aidl::android::hardware::graphics::common::PixelFormat;
 
 struct HardwareBufferReleaser {
@@ -111,7 +111,7 @@ TEST(FrameConsumerServiceTest, ImportsRegistrationAndTransfersFence) {
     auto backend = std::make_shared<RecordingBackend>();
     auto service = ndk::SharedRefBase::make<FrameConsumerService>(backend);
 
-    aidl::floral::stream::display::StreamState state;
+    aidl::floral::device::display::StreamState state;
     ASSERT_TRUE(service->getStreamState(0, &state).isOk());
     EXPECT_EQ(state.displayId, 0);
     EXPECT_EQ(state.generation, 5);
@@ -120,7 +120,7 @@ TEST(FrameConsumerServiceTest, ImportsRegistrationAndTransfersFence) {
     AHardwareBuffer_Desc description{};
     HardwareBuffer source = AllocateBuffer(&description);
     ASSERT_NE(source, nullptr);
-    aidl::floral::stream::display::BufferRegistration registration;
+    aidl::floral::device::display::BufferRegistration registration;
     registration.displayId = 0;
     registration.generation = 5;
     registration.bufferId = 81;
@@ -137,13 +137,13 @@ TEST(FrameConsumerServiceTest, ImportsRegistrationAndTransfersFence) {
 
     int pipeFds[2];
     ASSERT_EQ(pipe(pipeFds), 0);
-    aidl::floral::stream::display::FrameRequest request;
+    aidl::floral::device::display::FrameRequest request;
     request.displayId = 0;
     request.generation = 5;
     request.bufferId = 81;
     request.sourceSequence = 144;
     request.acquireFence = ndk::ScopedFileDescriptor(fcntl(pipeFds[0], F_DUPFD_CLOEXEC, 0));
-    aidl::floral::stream::display::FrameResult frameResult;
+    aidl::floral::device::display::FrameResult frameResult;
     ASSERT_TRUE(service->submitFrame(request, &frameResult).isOk());
     EXPECT_EQ(frameResult.status, AidlFrameStatus::ACCEPTED);
     EXPECT_GE(frameResult.releaseFence.get(), 0);
@@ -157,11 +157,11 @@ TEST(FrameConsumerServiceTest, ImportsRegistrationAndTransfersFence) {
 
 TEST(FrameConsumerServiceTest, NullBackendRemainsInactive) {
     auto service = ndk::SharedRefBase::make<FrameConsumerService>(nullptr);
-    aidl::floral::stream::display::StreamState state;
+    aidl::floral::device::display::StreamState state;
     ASSERT_TRUE(service->getStreamState(7, &state).isOk());
     EXPECT_EQ(state.displayId, 7);
     EXPECT_FALSE(state.acceptingFrames);
 }
 
 }  // namespace
-}  // namespace floral::stream::display
+}  // namespace floral::device::display

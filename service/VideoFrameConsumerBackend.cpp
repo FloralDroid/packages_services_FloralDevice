@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "floral-stream"
+#define LOG_TAG "floral-device"
 
-#include "floral/stream/service/VideoFrameConsumerBackend.h"
+#include "floral/device/service/VideoFrameConsumerBackend.h"
 
 #include <android-base/logging.h>
 
@@ -28,10 +28,10 @@
 #include <unordered_map>
 #include <utility>
 
-namespace floral::stream::service {
+namespace floral::device::service {
 namespace {
 
-using AidlFrameStatus = aidl::floral::stream::display::FrameStatus;
+using AidlFrameStatus = aidl::floral::device::display::FrameStatus;
 
 uint32_t NextGeneration(uint32_t generation) {
     constexpr uint32_t kMaximumGeneration =
@@ -232,4 +232,4 @@ std::shared_ptr<display::FrameConsumerBackend> CreateVideoFrameConsumerBackend(
     return std::make_shared<VideoFrameConsumerBackend>(std::move(config));
 }
 
-}  // namespace floral::stream::service
+}  // namespace floral::device::service

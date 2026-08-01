@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "floral/stream/display/HardwareBufferImporter.h"
+#include "floral/device/display/HardwareBufferImporter.h"
 
 #include <aidlcommonsupport/NativeHandle.h>
 #include <cutils/native_handle.h>
@@ -25,7 +25,7 @@
 #include <memory>
 #include <string>
 
-namespace floral::stream::display {
+namespace floral::device::display {
 namespace {
 
 struct NativeHandleViewDeleter {
@@ -105,4 +105,4 @@ UniqueHardwareBuffer ImportHardwareBuffer(
     return UniqueHardwareBuffer(imported);
 }
 
-}  // namespace floral::stream::display
+}  // namespace floral::device::display

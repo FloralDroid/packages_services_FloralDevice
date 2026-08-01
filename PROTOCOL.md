@@ -1,4 +1,4 @@
-# FloralStream Host Video Protocol
+# Floral Device Host Protocols
 
 The video channel is a Unix `SOCK_STREAM`. Every H.264 access unit starts with
 a fixed 80-byte header followed by exactly `payload_size` bytes. Integer fields
@@ -52,16 +52,16 @@ to the caller instead of blocking the encoder thread. The session manager is
 responsible for dropping dependent frames, requesting an IDR, and marking the
 next recoverable packet as a discontinuity.
 
-## Host control channel
+## FHC1 HAL/device control channel
 
 The control channel is a bidirectional Unix `SOCK_STREAM`. The host listens at
 `/mnt/vendor/floral_stream/control.sock` by default and the container connects
-to it. Every FSC1 message starts with a fixed 24-byte header. Integer fields use
+to it. Every FHC1 message starts with a fixed 24-byte header. Integer fields use
 network byte order.
 
 | Offset | Size | Field |
 | ---: | ---: | --- |
-| 0 | 4 | Magic `FSC1` |
+| 0 | 4 | Magic `FHC1` |
 | 4 | 2 | Protocol version, currently `1` |
 | 6 | 2 | Header size, currently `24` |
 | 8 | 2 | Message type |
@@ -109,5 +109,15 @@ socket disconnects, external displays remain for the configured three-second
 lease. A valid full snapshot received after reconnection cancels the pending
 expiry without changing the topology generation when content is identical. If
 the lease expires, the controller publishes an empty external-display snapshot.
-The primary display is not represented in FSC1 and cannot be removed through
-this channel.
+The primary display is not represented in FHC1 and cannot be removed through
+this channel. FHC1 is reserved for HAL/device configuration, capability, and
+status operations; touch, keyboard, and other device actions do not use this
+channel.
+
+## FDO1 device-operation channel
+
+The operation channel is a separate bidirectional Unix `SOCK_STREAM` at
+`/mnt/vendor/floral_stream/operate.sock`. It is reserved for device actions
+such as touch, keyboard, mouse, gestures, and explicit display operations.
+The FDO1 header and operation payloads are not frozen in this repository yet.
+No FDO1 listener or connector is implemented by the current milestone.

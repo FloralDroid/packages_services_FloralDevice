@@ -1,8 +1,9 @@
-# FloralStream
+# Floral Device
 
-FloralStream owns container-side media encoding sessions for FloralDroid. The
+Floral Device owns Android-side device orchestration for FloralDroid. The
 current milestone connects final display buffers to low-latency H.264 software
-or hardware encoding and sends the encoded access units to a host Unix socket.
+or hardware encoding, publishes display topology state, and sends encoded
+access units to host Unix sockets.
 
 Current modules:
 
@@ -15,23 +16,25 @@ Current modules:
   shader to rotate into one reusable coded-size AHardwareBuffer before VA VPP.
 - `libfloral_stream_transport`: versioned host video framing and a bounded Unix
   stream sender that keeps socket backpressure off the encoder thread.
-- `libfloral_stream_control`: the bidirectional FSC1 host control channel,
-  bounded framing, reconnect handling, and authority lease lifecycle.
+- `libfloral_hal_control`: the bidirectional FHC1 HAL/device configuration
+  channel, bounded framing, reconnect handling, and authority lease lifecycle.
 - `libfloral_stream_session`: single-worker encoder-to-host orchestration,
   submission timestamp correlation, and key-frame recovery policy.
-- `floral.stream.display`: versioned system/vendor AIDL contract for final
+- `floral.device.display`: versioned system/vendor AIDL contract for final
   display buffer registration and acquire/release fence exchange.
-- `libfloral_stream_display_ingress`: clones transported native handles into
+- `floral.device.display.topology`: read-only topology snapshot and listener
+  contract used by the HWC adapter.
+- `libfloral_device_display_ingress`: clones transported native handles into
   service-owned AHardwareBuffers without borrowing Binder parcel descriptors.
-- `libfloral_display_topology_service`: the single topology controller,
-  read-only state publisher, and FSC1 full-snapshot command handler.
+- `libfloral_hal_control_center`: the HAL/device configuration dispatch layer,
+  topology adapter, read-only state publisher, and FHC1 handler.
 - `floral_stream_codec_tests`: software MediaCodec selection, EGL surface
   input, dynamic bitrate, output integrity, rotated portrait buffer reuse,
   host transport, and an x86_64 VA-API DRM PRIME/VPP integration test.
-- `floral_stream_display_tests`: cross-process HardwareBuffer import
-  ownership, descriptor validation, topology state publication, FSC1 parsing,
+- `floral_device_display_tests`: cross-process HardwareBuffer import
+  ownership, descriptor validation, topology state publication, FHC1 parsing,
   and control authority lease behavior.
-- `floral_stream_service`: production Binder endpoint and single-display video
+- `floral_device_service`: production Binder endpoint and single-display video
   backend. It stays inactive until the host video socket is available, then
   owns the selected encoder session and reconnect generation.
 
@@ -50,6 +53,10 @@ them for three seconds so a host process can reconnect without hotplug churn;
 `ro.boot.floral_control_disconnect_lease_ms` changes that bounded lease.
 Lease expiry removes external displays but never changes the permanent primary.
 
+The separate `/mnt/vendor/floral_stream/operate.sock` endpoint is reserved for
+the FDO1 device-operation plane. It is intentionally not implemented by this
+milestone and is not parsed by the HAL configuration channel.
+
 The service keeps socket backpressure away from SurfaceFlinger. The current
 software frame submission remains synchronous only until EGL has queued the
 source read and produced its release fence. VA-API submission currently waits
@@ -58,4 +65,5 @@ fallback also waits for its intermediate render before starting VPP because VA
 does not accept the Android native fence directly. Codec output dequeueing
 remains non-blocking.
 
-Audio and input are not part of this milestone.
+The primary audio HAL is maintained in `hardware_floral_audio`. Device
+operation input is reserved for the separate FDO1 channel.

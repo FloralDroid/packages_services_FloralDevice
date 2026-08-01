@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "floral-stream-control"
+#define LOG_TAG "floral-device-control"
 
-#include "floral/stream/control/HostControlChannel.h"
+#include "floral/device/control/HostControlChannel.h"
 
-#include "floral/stream/control/ControlProtocol.h"
-#include "floral/stream/control/ControlRequestHandler.h"
+#include "floral/device/control/ControlProtocol.h"
+#include "floral/device/control/ControlRequestHandler.h"
 
 #include <log/log.h>
 #include <poll.h>
@@ -41,7 +41,7 @@
 #include <utility>
 #include <vector>
 
-namespace floral::stream::control {
+namespace floral::device::control {
 namespace {
 
 using Clock = std::chrono::steady_clock;
@@ -359,4 +359,4 @@ bool HostControlChannel::connected() const {
     return impl_ != nullptr && impl_->connected();
 }
 
-}  // namespace floral::stream::control
+}  // namespace floral::device::control

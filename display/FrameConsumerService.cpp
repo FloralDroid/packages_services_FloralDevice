@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "floral/stream/display/FrameConsumerService.h"
+#include "floral/device/display/FrameConsumerService.h"
 
 #include <fcntl.h>
 
@@ -24,10 +24,10 @@
 #include <string>
 #include <utility>
 
-namespace floral::stream::display {
+namespace floral::device::display {
 namespace {
 
-using AidlFrameStatus = aidl::floral::stream::display::FrameStatus;
+using AidlFrameStatus = aidl::floral::device::display::FrameStatus;
 
 android::base::unique_fd DuplicateFence(const ndk::ScopedFileDescriptor& fence) {
     if (fence.get() < 0) {
@@ -71,7 +71,7 @@ FrameConsumerService::FrameConsumerService(std::shared_ptr<FrameConsumerBackend>
     : backend_(backend != nullptr ? std::move(backend) : CreateInactiveFrameConsumerBackend()) {}
 
 ndk::ScopedAStatus FrameConsumerService::getStreamState(
-        int64_t displayId, aidl::floral::stream::display::StreamState* result) {
+        int64_t displayId, aidl::floral::device::display::StreamState* result) {
     if (result == nullptr) {
         return ndk::ScopedAStatus::fromExceptionCode(EX_NULL_POINTER);
     }
@@ -94,7 +94,7 @@ ndk::ScopedAStatus FrameConsumerService::getStreamState(
 }
 
 ndk::ScopedAStatus FrameConsumerService::registerBuffer(
-        const aidl::floral::stream::display::BufferRegistration& registration,
+        const aidl::floral::device::display::BufferRegistration& registration,
         AidlFrameStatus* result) {
     if (result == nullptr) {
         return ndk::ScopedAStatus::fromExceptionCode(EX_NULL_POINTER);
@@ -120,8 +120,8 @@ ndk::ScopedAStatus FrameConsumerService::registerBuffer(
 }
 
 ndk::ScopedAStatus FrameConsumerService::submitFrame(
-        const aidl::floral::stream::display::FrameRequest& request,
-        aidl::floral::stream::display::FrameResult* result) {
+        const aidl::floral::device::display::FrameRequest& request,
+        aidl::floral::device::display::FrameResult* result) {
     if (result == nullptr) {
         return ndk::ScopedAStatus::fromExceptionCode(EX_NULL_POINTER);
     }
@@ -155,4 +155,4 @@ ndk::ScopedAStatus FrameConsumerService::submitFrame(
     return ndk::ScopedAStatus::ok();
 }
 
-}  // namespace floral::stream::display
+}  // namespace floral::device::display

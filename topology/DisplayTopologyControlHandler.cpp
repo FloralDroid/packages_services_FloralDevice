@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-#include "floral/stream/topology/DisplayTopologyControlHandler.h"
+#include "floral/device/display/topology/DisplayTopologyControlHandler.h"
 
-#include "floral/stream/topology/DisplayTopologyControlProtocol.h"
-#include "floral/stream/topology/DisplayTopologyController.h"
+#include "floral/device/display/topology/DisplayTopologyControlProtocol.h"
+#include "floral/device/display/topology/DisplayTopologyController.h"
 
 #include <utility>
 #include <vector>
 
-namespace floral::stream::topology {
+namespace floral::device::display::topology {
 
 DisplayTopologyControlHandler::DisplayTopologyControlHandler(
         std::shared_ptr<DisplayTopologyController> controller)
@@ -70,4 +70,4 @@ void DisplayTopologyControlHandler::OnAuthorityLeaseExpired() {
     }
 }
 
-}  // namespace floral::stream::topology
+}  // namespace floral::device::display::topology

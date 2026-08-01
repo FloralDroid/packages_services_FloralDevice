@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-#include "floral/stream/control/ControlProtocol.h"
+#include "floral/device/control/ControlProtocol.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-namespace floral::stream::control {
+namespace floral::device::control {
 namespace {
 
 TEST(ControlProtocolTest, RoundTripsFixedHeader) {
@@ -79,4 +79,4 @@ TEST(ControlProtocolTest, BuildsCorrelatedErrorResponse) {
 }
 
 }  // namespace
-}  // namespace floral::stream::control
+}  // namespace floral::device::control

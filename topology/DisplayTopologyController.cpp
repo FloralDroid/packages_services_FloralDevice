@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-#include "floral/stream/topology/DisplayTopologyController.h"
+#include "floral/device/display/topology/DisplayTopologyController.h"
 
-#include "floral/stream/topology/DisplayTopologyStateService.h"
+#include "floral/device/display/topology/DisplayTopologyStateService.h"
 
 #include <utility>
 
-namespace floral::stream::topology {
+namespace floral::device::display::topology {
 
 DisplayTopologyController::DisplayTopologyController(
         std::shared_ptr<DisplayTopologyStateService> state_service)
@@ -38,4 +38,4 @@ TopologyUpdate DisplayTopologyController::ClearExternalDisplays() {
     return ReplaceExternalDisplays({});
 }
 
-}  // namespace floral::stream::topology
+}  // namespace floral::device::display::topology

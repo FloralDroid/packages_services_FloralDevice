@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-#include "floral/stream/control/HostControlChannel.h"
+#include "floral/device/control/HostControlChannel.h"
 
-#include "floral/stream/control/ControlProtocol.h"
-#include "floral/stream/topology/DisplayTopologyControlHandler.h"
-#include "floral/stream/topology/DisplayTopologyControlProtocol.h"
-#include "floral/stream/topology/DisplayTopologyController.h"
-#include "floral/stream/topology/DisplayTopologyStateService.h"
+#include "floral/device/control/ControlProtocol.h"
+#include "floral/device/display/topology/DisplayTopologyControlHandler.h"
+#include "floral/device/display/topology/DisplayTopologyControlProtocol.h"
+#include "floral/device/display/topology/DisplayTopologyController.h"
+#include "floral/device/display/topology/DisplayTopologyStateService.h"
 
 #include <android-base/unique_fd.h>
 #include <gtest/gtest.h>
@@ -39,7 +39,7 @@
 #include <utility>
 #include <vector>
 
-namespace floral::stream::control {
+namespace floral::device::control {
 namespace {
 
 using topology::DisplayTopologyControlHandler;
@@ -240,4 +240,4 @@ TEST(HostControlChannelTest, ReconnectedSnapshotCancelsPendingLeaseWithoutHotplu
 }
 
 }  // namespace
-}  // namespace floral::stream::control
+}  // namespace floral::device::control

@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-#include "floral/stream/topology/DisplayTopologyControlProtocol.h"
+#include "floral/device/display/topology/DisplayTopologyControlProtocol.h"
 
 #include <algorithm>
 #include <limits>
 #include <string_view>
 #include <utility>
 
-namespace floral::stream::topology {
+namespace floral::device::display::topology {
 namespace {
 
 constexpr size_t kSnapshotHeaderSize = 8;
@@ -315,4 +315,4 @@ bool ParseReplaceDisplayTopologyResponse(const std::vector<uint8_t>& payload,
     return true;
 }
 
-}  // namespace floral::stream::topology
+}  // namespace floral::device::display::topology

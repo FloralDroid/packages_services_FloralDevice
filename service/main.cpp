@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "floral-stream"
+#define LOG_TAG "floral-device"
 
-#include "floral/stream/control/HostControlChannel.h"
-#include "floral/stream/display/FrameConsumerService.h"
-#include "floral/stream/service/VideoFrameConsumerBackend.h"
-#include "floral/stream/topology/DisplayTopologyControlHandler.h"
-#include "floral/stream/topology/DisplayTopologyController.h"
-#include "floral/stream/topology/DisplayTopologyStateService.h"
+#include "floral/device/control/HostControlChannel.h"
+#include "floral/device/display/FrameConsumerService.h"
+#include "floral/device/service/VideoFrameConsumerBackend.h"
+#include "floral/device/display/topology/DisplayTopologyControlHandler.h"
+#include "floral/device/display/topology/DisplayTopologyController.h"
+#include "floral/device/display/topology/DisplayTopologyStateService.h"
 
-#include <aidl/floral/display/topology/IDisplayTopologyState.h>
-#include <aidl/floral/stream/display/IFrameConsumer.h>
+#include <aidl/floral/device/display/topology/IDisplayTopologyState.h>
+#include <aidl/floral/device/display/IFrameConsumer.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android/binder_manager.h>
@@ -49,19 +49,19 @@ uint32_t BoundedProperty(const char* name, uint32_t defaultValue, uint32_t minim
     return value < minimum ? defaultValue : value;
 }
 
-std::optional<floral::stream::service::VideoFrameConsumerBackendConfig> LoadConfig() {
-    floral::stream::service::VideoFrameConsumerBackendConfig config;
+std::optional<floral::device::service::VideoFrameConsumerBackendConfig> LoadConfig() {
+    floral::device::service::VideoFrameConsumerBackendConfig config;
     config.display_id = 1;
     config.video_socket_path =
             android::base::GetProperty("ro.boot.floral_video_socket", kDefaultVideoSocketPath);
     config.session_config.stream_id = 1;
-    const uint32_t logicalWidth = BoundedProperty("ro.boot.redroid_width", 1920, 320, 7680);
-    const uint32_t logicalHeight = BoundedProperty("ro.boot.redroid_height", 1080, 320, 4320);
+    const uint32_t logicalWidth = BoundedProperty("ro.boot.floral_width", 1920, 320, 7680);
+    const uint32_t logicalHeight = BoundedProperty("ro.boot.floral_height", 1080, 320, 4320);
     config.session_config.geometry =
             floral::stream::MakeLandscapeCodedGeometry(logicalWidth, logicalHeight);
     config.session_config.encoder.width = config.session_config.geometry.coded_width;
     config.session_config.encoder.height = config.session_config.geometry.coded_height;
-    config.session_config.encoder.frame_rate = BoundedProperty("ro.boot.redroid_fps", 60, 1, 60);
+    config.session_config.encoder.frame_rate = BoundedProperty("ro.boot.floral_fps", 60, 1, 60);
     config.session_config.encoder.bitrate_bps =
             BoundedProperty("ro.boot.floral_video_bitrate", 8'000'000, 100'000, 100'000'000);
     config.session_config.encoder.i_frame_interval_seconds = 1;
@@ -82,8 +82,8 @@ std::optional<floral::stream::service::VideoFrameConsumerBackendConfig> LoadConf
     return config;
 }
 
-floral::stream::control::HostControlChannelConfig LoadControlConfig() {
-    floral::stream::control::HostControlChannelConfig config;
+floral::device::control::HostControlChannelConfig LoadControlConfig() {
+    floral::device::control::HostControlChannelConfig config;
     config.socket_path =
             android::base::GetProperty("ro.boot.floral_control_socket", kDefaultControlSocketPath);
     config.authority_lease = std::chrono::milliseconds(
@@ -97,29 +97,29 @@ int main(int argc, char** argv) {
     android::base::InitLogging(argv, android::base::KernelLogger);
     (void)argc;
 
-    const std::optional<floral::stream::service::VideoFrameConsumerBackendConfig> config =
+    const std::optional<floral::device::service::VideoFrameConsumerBackendConfig> config =
             LoadConfig();
     if (!config.has_value()) {
         return 1;
     }
-    std::shared_ptr<floral::stream::display::FrameConsumerBackend> backend =
-            floral::stream::service::CreateVideoFrameConsumerBackend(*config);
+    std::shared_ptr<floral::device::display::FrameConsumerBackend> backend =
+            floral::device::service::CreateVideoFrameConsumerBackend(*config);
     if (backend == nullptr) {
-        LOG(ERROR) << "failed to create the FloralStream video backend";
+        LOG(ERROR) << "failed to create the FloralDevice video backend";
         return 1;
     }
 
-    auto frameService = ndk::SharedRefBase::make<floral::stream::display::FrameConsumerService>(
+    auto frameService = ndk::SharedRefBase::make<floral::device::display::FrameConsumerService>(
             std::move(backend));
     auto topologyStateService =
-            ndk::SharedRefBase::make<floral::stream::topology::DisplayTopologyStateService>();
-    auto topologyController = std::make_shared<floral::stream::topology::DisplayTopologyController>(
+            ndk::SharedRefBase::make<floral::device::display::topology::DisplayTopologyStateService>();
+    auto topologyController = std::make_shared<floral::device::display::topology::DisplayTopologyController>(
             topologyStateService);
     auto topologyControlHandler =
-            std::make_shared<floral::stream::topology::DisplayTopologyControlHandler>(
+            std::make_shared<floral::device::display::topology::DisplayTopologyControlHandler>(
                     topologyController);
     const std::string frameInstance =
-            std::string(aidl::floral::stream::display::IFrameConsumer::descriptor) + "/default";
+            std::string(aidl::floral::device::display::IFrameConsumer::descriptor) + "/default";
     const std::string topologyStateInstance =
             std::string(aidl::floral::display::topology::IDisplayTopologyState::descriptor) +
             "/default";
@@ -141,8 +141,8 @@ int main(int argc, char** argv) {
     }
 
     std::string controlError;
-    std::unique_ptr<floral::stream::control::HostControlChannel> controlChannel =
-            floral::stream::control::HostControlChannel::Create(
+    std::unique_ptr<floral::device::control::HostControlChannel> controlChannel =
+            floral::device::control::HostControlChannel::Create(
                     LoadControlConfig(), std::move(topologyControlHandler), &controlError);
     if (controlChannel == nullptr) {
         LOG(ERROR) << "failed to start the host control channel: " << controlError;

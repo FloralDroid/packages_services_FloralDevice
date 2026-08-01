@@ -1,22 +1,22 @@
 package {
-    default_applicable_licenses: ["packages_services_FloralStream_license"],
+    default_applicable_licenses: ["packages_services_FloralDevice_license"],
 }
 
 license {
-    name: "packages_services_FloralStream_license",
+    name: "packages_services_FloralDevice_license",
     visibility: [":__subpackages__"],
     license_kinds: ["SPDX-license-identifier-Apache-2.0"],
     license_text: ["LICENSE"],
 }
 
 aidl_interface {
-    name: "floral.stream.display",
+    name: "floral.device.display",
     // This vendor interface is versioned independently from the platform release cycle.
     owner: "floraldroid",
     vendor_available: true,
     local_include_dir: "aidl",
     srcs: [
-        "aidl/floral/stream/display/*.aidl",
+        "aidl/floral/device/display/*.aidl",
     ],
     imports: [
         "android.hardware.graphics.common-V2",
@@ -37,13 +37,13 @@ aidl_interface {
 }
 
 aidl_interface {
-    name: "floral.display.topology",
+    name: "floral.device.display.topology",
     // External client transports adapt to this container-internal contract.
     owner: "floraldroid",
     vendor_available: true,
     local_include_dir: "aidl",
     srcs: [
-        "aidl/floral/display/topology/*.aidl",
+        "aidl/floral/device/display/topology/*.aidl",
     ],
     stability: "vintf",
     backend: {
@@ -60,7 +60,7 @@ aidl_interface {
 }
 
 cc_defaults {
-    name: "floral_stream_common_defaults",
+    name: "floral_device_common_defaults",
     cflags: [
         "-DEGL_EGLEXT_PROTOTYPES",
         "-DGL_GLEXT_PROTOTYPES",
@@ -77,7 +77,7 @@ cc_defaults {
 
 cc_library_static {
     name: "libfloral_stream_codec",
-    defaults: ["floral_stream_common_defaults"],
+    defaults: ["floral_device_common_defaults"],
     vendor: true,
     srcs: [
         "codec/EglFrameCopier.cpp",
@@ -116,7 +116,7 @@ cc_library_static {
 
 cc_library_static {
     name: "libfloral_stream_transport",
-    defaults: ["floral_stream_common_defaults"],
+    defaults: ["floral_device_common_defaults"],
     vendor: true,
     srcs: [
         "transport/EncodedPacketAdapter.cpp",
@@ -132,8 +132,8 @@ cc_library_static {
 }
 
 cc_library_static {
-    name: "libfloral_stream_control",
-    defaults: ["floral_stream_common_defaults"],
+    name: "libfloral_hal_control",
+    defaults: ["floral_device_common_defaults"],
     vendor_available: true,
     srcs: [
         "control/ControlProtocol.cpp",
@@ -148,7 +148,7 @@ cc_library_static {
 
 cc_library_static {
     name: "libfloral_stream_session",
-    defaults: ["floral_stream_common_defaults"],
+    defaults: ["floral_device_common_defaults"],
     vendor: true,
     srcs: [
         "session/VideoOutputController.cpp",
@@ -169,8 +169,8 @@ cc_library_static {
 }
 
 cc_library_static {
-    name: "libfloral_stream_display_ingress",
-    defaults: ["floral_stream_common_defaults"],
+    name: "libfloral_device_display_ingress",
+    defaults: ["floral_device_common_defaults"],
     vendor_available: true,
     srcs: [
         "display/HardwareBufferImporter.cpp",
@@ -188,19 +188,19 @@ cc_library_static {
 }
 
 cc_library_static {
-    name: "libfloral_stream_display_service",
-    defaults: ["floral_stream_common_defaults"],
+    name: "libfloral_device_display_service",
+    defaults: ["floral_device_common_defaults"],
     vendor_available: true,
     srcs: [
         "display/FrameConsumerService.cpp",
     ],
     static_libs: [
-        "libfloral_stream_display_ingress",
+        "libfloral_device_display_ingress",
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
         "android.hardware.graphics.common-V2-ndk_platform",
-        "floral.stream.display-V1-ndk_platform",
+        "floral.device.display-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
         "libnativewindow",
@@ -209,8 +209,8 @@ cc_library_static {
 }
 
 cc_library_static {
-    name: "libfloral_display_topology_service",
-    defaults: ["floral_stream_common_defaults"],
+    name: "libfloral_hal_control_center",
+    defaults: ["floral_device_common_defaults"],
     vendor_available: true,
     srcs: [
         "topology/DisplayTopologyController.cpp",
@@ -219,18 +219,18 @@ cc_library_static {
         "topology/DisplayTopologyStateService.cpp",
     ],
     static_libs: [
-        "libfloral_stream_control",
+        "libfloral_hal_control",
     ],
     shared_libs: [
-        "floral.display.topology-V1-ndk_platform",
+        "floral.device.display.topology-V1-ndk_platform",
         "libbinder_ndk",
     ],
     export_include_dirs: ["include"],
 }
 
 cc_library_static {
-    name: "libfloral_stream_runtime",
-    defaults: ["floral_stream_common_defaults"],
+    name: "libfloral_device_runtime",
+    defaults: ["floral_device_common_defaults"],
     vendor: true,
     srcs: [
         "service/VideoFrameConsumerBackend.cpp",
@@ -241,7 +241,7 @@ cc_library_static {
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
         "android.hardware.graphics.common-V2-ndk_platform",
-        "floral.stream.display-V1-ndk_platform",
+        "floral.device.display-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
         "libEGL",
@@ -253,8 +253,8 @@ cc_library_static {
 }
 
 cc_binary {
-    name: "floral_stream_service",
-    defaults: ["floral_stream_common_defaults"],
+    name: "floral_device_service",
+    defaults: ["floral_device_common_defaults"],
     vendor: true,
     relative_install_path: "hw",
     srcs: [
@@ -263,19 +263,19 @@ cc_binary {
     static_libs: [
         "libaidlcommonsupport",
         "libfloral_stream_codec",
-        "libfloral_stream_control",
-        "libfloral_stream_display_ingress",
-        "libfloral_stream_display_service",
-        "libfloral_display_topology_service",
-        "libfloral_stream_runtime",
+        "libfloral_hal_control",
+        "libfloral_device_display_ingress",
+        "libfloral_device_display_service",
+        "libfloral_hal_control_center",
+        "libfloral_device_runtime",
         "libfloral_stream_session",
         "libfloral_stream_transport",
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
         "android.hardware.graphics.common-V2-ndk_platform",
-        "floral.stream.display-V1-ndk_platform",
-        "floral.display.topology-V1-ndk_platform",
+        "floral.device.display-V1-ndk_platform",
+        "floral.device.display.topology-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
         "libcutils",
@@ -289,13 +289,13 @@ cc_binary {
         "libhardware",
         "liblog",
     ],
-    init_rc: ["service/floral-stream.rc"],
-    vintf_fragments: ["service/floral-stream.xml"],
+    init_rc: ["service/floral-device.rc"],
+    vintf_fragments: ["service/floral-device.xml"],
 }
 
 cc_test {
     name: "floral_stream_codec_tests",
-    defaults: ["floral_stream_common_defaults"],
+    defaults: ["floral_device_common_defaults"],
     vendor: true,
     srcs: [
         "tests/EglSurfaceRenderer.cpp",
@@ -329,8 +329,8 @@ cc_test {
 }
 
 cc_test {
-    name: "floral_stream_display_tests",
-    defaults: ["floral_stream_common_defaults"],
+    name: "floral_device_display_tests",
+    defaults: ["floral_device_common_defaults"],
     srcs: [
         "tests/ControlProtocolTest.cpp",
         "tests/DisplayTopologyControlProtocolTest.cpp",
@@ -340,17 +340,17 @@ cc_test {
         "tests/HardwareBufferImporterTest.cpp",
     ],
     static_libs: [
-        "libfloral_display_topology_service",
+        "libfloral_hal_control_center",
         "libaidlcommonsupport",
-        "libfloral_stream_control",
-        "libfloral_stream_display_ingress",
-        "libfloral_stream_display_service",
+        "libfloral_hal_control",
+        "libfloral_device_display_ingress",
+        "libfloral_device_display_service",
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
         "android.hardware.graphics.common-V2-ndk_platform",
-        "floral.stream.display-V1-ndk_platform",
-        "floral.display.topology-V1-ndk_platform",
+        "floral.device.display-V1-ndk_platform",
+        "floral.device.display.topology-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
         "libcutils",

@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-#include "floral/stream/topology/DisplayTopologyController.h"
-#include "floral/stream/topology/DisplayTopologyStateService.h"
+#include "floral/device/display/topology/DisplayTopologyController.h"
+#include "floral/device/display/topology/DisplayTopologyStateService.h"
 
-#include <aidl/floral/display/topology/BnDisplayTopologyListener.h>
+#include <aidl/floral/device/display/topology/BnDisplayTopologyListener.h>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -26,7 +26,7 @@
 #include <utility>
 #include <vector>
 
-namespace floral::stream::topology {
+namespace floral::device::display::topology {
 namespace {
 
 class RecordingListener final : public aidl::floral::display::topology::BnDisplayTopologyListener {
@@ -140,4 +140,4 @@ TEST(DisplayTopologyStateServiceTest, StopsNotificationsAfterUnregister) {
 }
 
 }  // namespace
-}  // namespace floral::stream::topology
+}  // namespace floral::device::display::topology

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "floral/stream/display/HardwareBufferImporter.h"
+#include "floral/device/display/HardwareBufferImporter.h"
 
 #include <aidl/android/hardware/graphics/common/BufferUsage.h>
 #include <aidl/android/hardware/graphics/common/HardwareBuffer.h>
@@ -26,7 +26,7 @@
 #include <cstdint>
 #include <string>
 
-namespace floral::stream::display {
+namespace floral::device::display {
 namespace {
 
 using aidl::android::hardware::graphics::common::BufferUsage;
@@ -96,4 +96,4 @@ TEST(HardwareBufferImporterTest, RejectsInvalidDescriptionBeforeImport) {
 }
 
 }  // namespace
-}  // namespace floral::stream::display
+}  // namespace floral::device::display

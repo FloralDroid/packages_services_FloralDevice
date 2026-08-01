@@ -1,0 +1,7 @@
+service vendor.floral-device /vendor/bin/hw/floral_device_service
+    class hal
+    user system
+    group system graphics media
+    priority -10
+    writepid /dev/cpuset/system-background/tasks
+    shutdown critical

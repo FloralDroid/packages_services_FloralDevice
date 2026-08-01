@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-#include "floral/stream/control/ControlProtocol.h"
+#include "floral/device/control/ControlProtocol.h"
 
-namespace floral::stream::control {
+namespace floral::device::control {
 namespace {
 
 constexpr size_t kMagicOffset = 0;
@@ -136,4 +136,4 @@ bool SerializeControlErrorResponse(uint32_t request_id, uint16_t failed_message_
     return true;
 }
 
-}  // namespace floral::stream::control
+}  // namespace floral::device::control
