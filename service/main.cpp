@@ -16,15 +16,21 @@
 
 #define LOG_TAG "floral-stream"
 
+#include "floral/stream/control/HostControlChannel.h"
 #include "floral/stream/display/FrameConsumerService.h"
 #include "floral/stream/service/VideoFrameConsumerBackend.h"
+#include "floral/stream/topology/DisplayTopologyControlHandler.h"
+#include "floral/stream/topology/DisplayTopologyController.h"
+#include "floral/stream/topology/DisplayTopologyStateService.h"
 
+#include <aidl/floral/display/topology/IDisplayTopologyState.h>
 #include <aidl/floral/stream/display/IFrameConsumer.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
 
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -34,6 +40,7 @@
 namespace {
 
 constexpr char kDefaultVideoSocketPath[] = "/mnt/vendor/floral_stream/video.sock";
+constexpr char kDefaultControlSocketPath[] = "/mnt/vendor/floral_stream/control.sock";
 constexpr char kDefaultVaDevicePath[] = "/dev/dri/renderD128";
 
 uint32_t BoundedProperty(const char* name, uint32_t defaultValue, uint32_t minimum,
@@ -75,6 +82,15 @@ std::optional<floral::stream::service::VideoFrameConsumerBackendConfig> LoadConf
     return config;
 }
 
+floral::stream::control::HostControlChannelConfig LoadControlConfig() {
+    floral::stream::control::HostControlChannelConfig config;
+    config.socket_path =
+            android::base::GetProperty("ro.boot.floral_control_socket", kDefaultControlSocketPath);
+    config.authority_lease = std::chrono::milliseconds(
+            BoundedProperty("ro.boot.floral_control_disconnect_lease_ms", 3000, 100, 60'000));
+    return config;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -93,21 +109,48 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    auto service = ndk::SharedRefBase::make<floral::stream::display::FrameConsumerService>(
+    auto frameService = ndk::SharedRefBase::make<floral::stream::display::FrameConsumerService>(
             std::move(backend));
-    const std::string instance =
+    auto topologyStateService =
+            ndk::SharedRefBase::make<floral::stream::topology::DisplayTopologyStateService>();
+    auto topologyController = std::make_shared<floral::stream::topology::DisplayTopologyController>(
+            topologyStateService);
+    auto topologyControlHandler =
+            std::make_shared<floral::stream::topology::DisplayTopologyControlHandler>(
+                    topologyController);
+    const std::string frameInstance =
             std::string(aidl::floral::stream::display::IFrameConsumer::descriptor) + "/default";
+    const std::string topologyStateInstance =
+            std::string(aidl::floral::display::topology::IDisplayTopologyState::descriptor) +
+            "/default";
 
     ABinderProcess_setThreadPoolMaxThreadCount(4);
     ABinderProcess_startThreadPool();
-    const binder_status_t status =
-            AServiceManager_addService(service->asBinder().get(), instance.c_str());
+    binder_status_t status =
+            AServiceManager_addService(frameService->asBinder().get(), frameInstance.c_str());
     if (status != STATUS_OK) {
-        LOG(ERROR) << "failed to register " << instance << ": binder status " << status;
+        LOG(ERROR) << "failed to register " << frameInstance << ": binder status " << status;
+        return 1;
+    }
+    status = AServiceManager_addService(topologyStateService->asBinder().get(),
+                                        topologyStateInstance.c_str());
+    if (status != STATUS_OK) {
+        LOG(ERROR) << "failed to register " << topologyStateInstance << ": binder status "
+                   << status;
         return 1;
     }
 
-    LOG(INFO) << instance << " is ready";
+    std::string controlError;
+    std::unique_ptr<floral::stream::control::HostControlChannel> controlChannel =
+            floral::stream::control::HostControlChannel::Create(
+                    LoadControlConfig(), std::move(topologyControlHandler), &controlError);
+    if (controlChannel == nullptr) {
+        LOG(ERROR) << "failed to start the host control channel: " << controlError;
+        return 1;
+    }
+
+    LOG(INFO) << frameInstance << " and " << topologyStateInstance
+              << " are ready; host control channel started";
     ABinderProcess_joinThreadPool();
     LOG(ERROR) << "Binder thread pool exited unexpectedly";
     return 1;

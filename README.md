@@ -15,18 +15,22 @@ Current modules:
   shader to rotate into one reusable coded-size AHardwareBuffer before VA VPP.
 - `libfloral_stream_transport`: versioned host video framing and a bounded Unix
   stream sender that keeps socket backpressure off the encoder thread.
+- `libfloral_stream_control`: the bidirectional FSC1 host control channel,
+  bounded framing, reconnect handling, and authority lease lifecycle.
 - `libfloral_stream_session`: single-worker encoder-to-host orchestration,
   submission timestamp correlation, and key-frame recovery policy.
 - `floral.stream.display`: versioned system/vendor AIDL contract for final
   display buffer registration and acquire/release fence exchange.
 - `libfloral_stream_display_ingress`: clones transported native handles into
   service-owned AHardwareBuffers without borrowing Binder parcel descriptors.
+- `libfloral_display_topology_service`: the single topology controller,
+  read-only state publisher, and FSC1 full-snapshot command handler.
 - `floral_stream_codec_tests`: software MediaCodec selection, EGL surface
   input, dynamic bitrate, output integrity, rotated portrait buffer reuse,
   host transport, and an x86_64 VA-API DRM PRIME/VPP integration test.
-- `floral_stream_display_tests`: cross-process HardwareBuffer import ownership
-  and descriptor validation.
-
+- `floral_stream_display_tests`: cross-process HardwareBuffer import
+  ownership, descriptor validation, topology state publication, FSC1 parsing,
+  and control authority lease behavior.
 - `floral_stream_service`: production Binder endpoint and single-display video
   backend. It stays inactive until the host video socket is available, then
   owns the selected encoder session and reconnect generation.
@@ -37,6 +41,14 @@ The service reads `ro.boot.floral_video_encoder`. `software` is the default;
 `/dev/dri/renderD128` device. MediaCodec updates bitrate in place. VA-API drains
 pending packets and reopens the codec at the new bitrate while retaining the
 registered display buffers and VA device.
+
+The service connects to the host control endpoint at
+`/mnt/vendor/floral_stream/control.sock`. The path can be changed with
+`ro.boot.floral_control_socket`. A valid full topology snapshot owns the
+external displays until it is replaced. After a disconnect, the service keeps
+them for three seconds so a host process can reconnect without hotplug churn;
+`ro.boot.floral_control_disconnect_lease_ms` changes that bounded lease.
+Lease expiry removes external displays but never changes the permanent primary.
 
 The service keeps socket backpressure away from SurfaceFlinger. The current
 software frame submission remains synchronous only until EGL has queued the

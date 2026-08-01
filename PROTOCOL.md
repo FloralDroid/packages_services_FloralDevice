@@ -51,3 +51,63 @@ these values are compared directly.
 to the caller instead of blocking the encoder thread. The session manager is
 responsible for dropping dependent frames, requesting an IDR, and marking the
 next recoverable packet as a discontinuity.
+
+## Host control channel
+
+The control channel is a bidirectional Unix `SOCK_STREAM`. The host listens at
+`/mnt/vendor/floral_stream/control.sock` by default and the container connects
+to it. Every FSC1 message starts with a fixed 24-byte header. Integer fields use
+network byte order.
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Magic `FSC1` |
+| 4 | 2 | Protocol version, currently `1` |
+| 6 | 2 | Header size, currently `24` |
+| 8 | 2 | Message type |
+| 10 | 2 | Flags, must be zero |
+| 12 | 4 | Nonzero request id copied into the response |
+| 16 | 4 | Payload size, at most 65536 bytes |
+| 20 | 4 | Reserved, must be zero |
+
+Message type `0x0100` replaces the complete desired external-display
+topology. Its response is `0x8100`. Unknown requests receive a generic
+`0x8000` error response. Full snapshots make reconnection idempotent and avoid
+ordering dependencies between incremental add and remove commands.
+
+The replace-topology payload begins with:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | External display count, at most 64 |
+| 4 | 4 | Reserved, must be zero |
+
+Each display then uses a variable-size record:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Record size including zero padding to four bytes |
+| 4 | 8 | Display id; 0 and 1 are reserved |
+| 12 | 4 | Physical port, range 1 through 255 |
+| 16 | 4 | Logical width |
+| 20 | 4 | Logical height |
+| 24 | 4 | Density in DPI |
+| 28 | 4 | Active refresh rate in Hz |
+| 32 | 2 | Supported refresh-rate count, at most 16 |
+| 34 | 2 | UTF-8 display-name byte length, at most 128 |
+| 36 | variable | Supported refresh rates as 32-bit integers |
+| next | variable | Display name without a trailing null |
+| next | 0-3 | Zero padding included in record size |
+
+The 16-byte `0x8100` response contains a 32-bit result, a zero reserved word,
+and the resulting 64-bit topology generation. Result values are `0` applied,
+`1` unchanged, `2` invalid display, `3` duplicate display id, `4`
+duplicate port, and `5` controller unavailable.
+
+A successfully applied or identical snapshot renews control authority. If the
+socket disconnects, external displays remain for the configured three-second
+lease. A valid full snapshot received after reconnection cancels the pending
+expiry without changing the topology generation when content is identical. If
+the lease expires, the controller publishes an empty external-display snapshot.
+The primary display is not represented in FSC1 and cannot be removed through
+this channel.

@@ -7,4 +7,12 @@
             <instance>default</instance>
         </interface>
     </hal>
+    <hal format="aidl">
+        <name>floral.display.topology</name>
+        <version>1</version>
+        <interface>
+            <name>IDisplayTopologyState</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
 </manifest>
