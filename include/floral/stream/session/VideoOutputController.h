@@ -32,6 +32,7 @@ struct VideoOutputConfig {
     uint32_t stream_id = 0;
     uint32_t generation = 0;
     VideoGeometry geometry;
+    bool initial_discontinuity = false;
     size_t max_pending_frame_timestamps = 512;
 };
 

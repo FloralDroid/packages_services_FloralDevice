@@ -14,22 +14,20 @@
  * limitations under the License.
  */
 
-#include "floral/device/display/topology/DisplayTopologyControlHandler.h"
+#include "floral/device/service/AudioEncoderControlHandler.h"
 
-#include "floral/device/display/topology/DisplayTopologyControlProtocol.h"
-#include "floral/device/display/topology/DisplayTopologyController.h"
+#include "floral/device/control/ControlProtocol.h"
+#include "floral/device/service/AudioEncoderControlProtocol.h"
 
 #include <utility>
-#include <vector>
 
-namespace floral::device::display::topology {
+namespace floral::device::service {
 
-DisplayTopologyControlHandler::DisplayTopologyControlHandler(
-        std::shared_ptr<DisplayTopologyController> controller)
-    : controller_(std::move(controller)) {}
+AudioEncoderControlHandler::AudioEncoderControlHandler(std::shared_ptr<AudioEncoderControl> control)
+    : control_(std::move(control)) {}
 
-bool DisplayTopologyControlHandler::Handle(const control::ControlRequest& request,
-                                           control::ControlResponse* response, std::string* error) {
+bool AudioEncoderControlHandler::Handle(const control::ControlRequest& request,
+                                        control::ControlResponse* response, std::string* error) {
     if (response == nullptr) {
         if (error != nullptr) {
             *error = "control response output is null";
@@ -44,32 +42,38 @@ bool DisplayTopologyControlHandler::Handle(const control::ControlRequest& reques
     if (!control::IsFhc1RouteKind(request.header.route_kind,
                                   control::ControlPacketKind::kRequest) ||
         request.header.command_id !=
-                static_cast<uint16_t>(control::ControlCommandId::kReplaceDisplayTopology)) {
+                static_cast<uint16_t>(control::ControlCommandId::kSetAudioEncoderConfig)) {
         return control::SerializeControlErrorResponse(
                 request.header.request_id, request.header.command_id,
                 control::ControlError::kUnsupportedMessage, response, error);
     }
 
-    std::vector<ManagedPhysicalDisplay> displays;
-    if (!ParseReplaceDisplayTopologyRequest(request.payload, &displays, error)) {
+    AudioEncoderConfigUpdate update;
+    if (!ParseAudioEncoderConfigRequest(request.payload, &update, error)) {
         return control::SerializeControlErrorResponse(
                 request.header.request_id, request.header.command_id,
                 control::ControlError::kMalformedRequest, response, error);
     }
-    if (controller_ == nullptr) {
+    if (control_ == nullptr) {
         return control::SerializeControlErrorResponse(
                 request.header.request_id, request.header.command_id,
                 control::ControlError::kInternalError, response, error);
     }
-    const TopologyUpdate update = controller_->ReplaceExternalDisplays(std::move(displays));
-    return SerializeReplaceDisplayTopologyResponse(update, request.header.request_id, response,
-                                                   error);
-}
 
-void DisplayTopologyControlHandler::OnAuthorityLeaseExpired() {
-    if (controller_ != nullptr) {
-        (void)controller_->ClearExternalDisplays();
+    AudioEncoderRuntimeState state;
+    AudioEncoderConfigResult result = AudioEncoderConfigResult::kInvalidConfig;
+    if (!control_->ApplyAudioEncoderConfig(update, &state, &result, error)) {
+        return control::SerializeControlErrorResponse(
+                request.header.request_id, request.header.command_id,
+                control::ControlError::kInternalError, response, error);
     }
+    return SerializeAudioEncoderConfigResponse(state, result, request.header.request_id, response,
+                                               error);
 }
 
-}  // namespace floral::device::display::topology
+void AudioEncoderControlHandler::OnAuthorityLeaseExpired() {
+    // Encoder tuning persists until an explicit replacement update, just like
+    // the video encoder configuration.
+}
+
+}  // namespace floral::device::service

@@ -60,6 +60,7 @@ std::unique_ptr<VideoStreamSession> VideoStreamSession::Create(
     outputConfig.stream_id = config.stream_id;
     outputConfig.generation = config.generation;
     outputConfig.geometry = config.geometry;
+    outputConfig.initial_discontinuity = config.initial_discontinuity;
     outputConfig.max_pending_frame_timestamps = config.max_pending_frame_timestamps;
     return std::unique_ptr<VideoStreamSession>(
             new VideoStreamSession(std::move(encoder), std::move(sink), std::move(outputConfig)));

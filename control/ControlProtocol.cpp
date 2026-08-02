@@ -22,8 +22,8 @@ namespace {
 constexpr size_t kMagicOffset = 0;
 constexpr size_t kVersionOffset = 4;
 constexpr size_t kHeaderSizeOffset = 6;
-constexpr size_t kMessageTypeOffset = 8;
-constexpr size_t kFlagsOffset = 10;
+constexpr size_t kCommandIdOffset = 8;
+constexpr size_t kRouteKindOffset = 10;
 constexpr size_t kRequestIdOffset = 12;
 constexpr size_t kPayloadSizeOffset = 16;
 constexpr size_t kReservedOffset = 20;
@@ -58,6 +58,22 @@ uint32_t ReadUint32(const uint8_t* input) {
     return value;
 }
 
+bool IsValidRouteKind(uint16_t route_kind) {
+    if ((route_kind & kControlPlaneMask) != kFhc1ControlPlane ||
+        (route_kind & kControlPacketFlagsMask) != 0) {
+        return false;
+    }
+    switch (route_kind & kControlPacketKindMask) {
+        case static_cast<uint16_t>(ControlPacketKind::kRequest) << 8:
+        case static_cast<uint16_t>(ControlPacketKind::kResponse) << 8:
+        case static_cast<uint16_t>(ControlPacketKind::kEvent) << 8:
+        case static_cast<uint16_t>(ControlPacketKind::kErrorResponse) << 8:
+            return true;
+        default:
+            return false;
+    }
+}
+
 }  // namespace
 
 bool SerializeControlPacketHeader(const ControlPacketHeader& header,
@@ -65,8 +81,8 @@ bool SerializeControlPacketHeader(const ControlPacketHeader& header,
     if (output == nullptr) {
         return SetError(error, "serialized control header output is null");
     }
-    if (header.flags != 0) {
-        return SetError(error, "control header contains unsupported flags");
+    if (!IsValidRouteKind(header.route_kind)) {
+        return SetError(error, "control header contains an unsupported route or kind");
     }
     if (header.payload_size > kMaximumControlPayloadSize) {
         return SetError(error, "control payload exceeds the protocol limit");
@@ -77,8 +93,8 @@ bool SerializeControlPacketHeader(const ControlPacketHeader& header,
     WriteUint16(output->data() + kVersionOffset, kControlPacketVersion);
     WriteUint16(output->data() + kHeaderSizeOffset,
                 static_cast<uint16_t>(kControlPacketHeaderSize));
-    WriteUint16(output->data() + kMessageTypeOffset, header.message_type);
-    WriteUint16(output->data() + kFlagsOffset, header.flags);
+    WriteUint16(output->data() + kCommandIdOffset, header.command_id);
+    WriteUint16(output->data() + kRouteKindOffset, header.route_kind);
     WriteUint32(output->data() + kRequestIdOffset, header.request_id);
     WriteUint32(output->data() + kPayloadSizeOffset, header.payload_size);
     WriteUint32(output->data() + kReservedOffset, 0);
@@ -104,12 +120,12 @@ bool ParseControlPacketHeader(const SerializedControlPacketHeader& input,
     }
 
     ControlPacketHeader parsed;
-    parsed.message_type = ReadUint16(input.data() + kMessageTypeOffset);
-    parsed.flags = ReadUint16(input.data() + kFlagsOffset);
+    parsed.command_id = ReadUint16(input.data() + kCommandIdOffset);
+    parsed.route_kind = ReadUint16(input.data() + kRouteKindOffset);
     parsed.request_id = ReadUint32(input.data() + kRequestIdOffset);
     parsed.payload_size = ReadUint32(input.data() + kPayloadSizeOffset);
-    if (parsed.flags != 0) {
-        return SetError(error, "control header contains unsupported flags");
+    if (!IsValidRouteKind(parsed.route_kind)) {
+        return SetError(error, "control header contains an unsupported route or kind");
     }
     if (parsed.payload_size > kMaximumControlPayloadSize) {
         return SetError(error, "control payload exceeds the protocol limit");
@@ -118,7 +134,7 @@ bool ParseControlPacketHeader(const SerializedControlPacketHeader& input,
     return true;
 }
 
-bool SerializeControlErrorResponse(uint32_t request_id, uint16_t failed_message_type,
+bool SerializeControlErrorResponse(uint32_t request_id, uint16_t failed_command_id,
                                    ControlError error_code, ControlResponse* response,
                                    std::string* error) {
     if (response == nullptr) {
@@ -127,9 +143,9 @@ bool SerializeControlErrorResponse(uint32_t request_id, uint16_t failed_message_
 
     response->payload.assign(8, 0);
     WriteUint32(response->payload.data(), static_cast<uint32_t>(error_code));
-    WriteUint16(response->payload.data() + 4, failed_message_type);
-    response->header.message_type = static_cast<uint16_t>(ControlMessageType::kErrorResponse);
-    response->header.flags = 0;
+    WriteUint16(response->payload.data() + 4, failed_command_id);
+    response->header.command_id = static_cast<uint16_t>(ControlCommandId::kGenericError);
+    response->header.route_kind = MakeFhc1RouteKind(ControlPacketKind::kErrorResponse);
     response->header.request_id = request_id;
     response->header.payload_size = static_cast<uint32_t>(response->payload.size());
     response->refreshes_authority_lease = false;

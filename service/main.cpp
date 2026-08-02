@@ -16,15 +16,21 @@
 
 #define LOG_TAG "floral-device"
 
+#include "floral/device/audio/AudioPcmSinkService.h"
+#include "floral/device/control/DeviceControlHandler.h"
 #include "floral/device/control/HostControlChannel.h"
 #include "floral/device/display/FrameConsumerService.h"
-#include "floral/device/service/VideoFrameConsumerBackend.h"
 #include "floral/device/display/topology/DisplayTopologyControlHandler.h"
 #include "floral/device/display/topology/DisplayTopologyController.h"
 #include "floral/device/display/topology/DisplayTopologyStateService.h"
+#include "floral/device/service/AudioEncoderControlHandler.h"
+#include "floral/device/service/VideoEncoderControlHandler.h"
+#include "floral/device/service/VideoFrameConsumerBackend.h"
+#include "floral/stream/audio/AudioStreamSession.h"
 
-#include <aidl/floral/device/display/topology/IDisplayTopologyState.h>
+#include <aidl/floral/device/audio/IAudioPcmSink.h>
 #include <aidl/floral/device/display/IFrameConsumer.h>
+#include <aidl/floral/device/display/topology/IDisplayTopologyState.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android/binder_manager.h>
@@ -40,6 +46,7 @@
 namespace {
 
 constexpr char kDefaultVideoSocketPath[] = "/mnt/vendor/floral_stream/video.sock";
+constexpr char kDefaultAudioSocketPath[] = "/mnt/vendor/floral_stream/audio.sock";
 constexpr char kDefaultControlSocketPath[] = "/mnt/vendor/floral_stream/control.sock";
 constexpr char kDefaultVaDevicePath[] = "/dev/dri/renderD128";
 
@@ -82,6 +89,15 @@ std::optional<floral::device::service::VideoFrameConsumerBackendConfig> LoadConf
     return config;
 }
 
+floral::stream::audio::AudioStreamSessionConfig LoadAudioConfig() {
+    floral::stream::audio::AudioStreamSessionConfig config;
+    config.socket_path =
+            android::base::GetProperty("ro.boot.floral_audio_socket", kDefaultAudioSocketPath);
+    config.stream_id = 1;
+    config.bitrate_bps = BoundedProperty("ro.boot.floral_audio_bitrate", 128'000, 16'000, 512'000);
+    return config;
+}
+
 floral::device::control::HostControlChannelConfig LoadControlConfig() {
     floral::device::control::HostControlChannelConfig config;
     config.socket_path =
@@ -97,31 +113,57 @@ int main(int argc, char** argv) {
     android::base::InitLogging(argv, android::base::KernelLogger);
     (void)argc;
 
+    std::string audioError;
+    std::shared_ptr<floral::stream::audio::AudioStreamSession> audioSession =
+            floral::stream::audio::AudioStreamSession::Create(LoadAudioConfig(), &audioError);
+    if (audioSession == nullptr) {
+        LOG(ERROR) << "failed to create the FloralDevice audio session: " << audioError;
+        return 1;
+    }
+
     const std::optional<floral::device::service::VideoFrameConsumerBackendConfig> config =
             LoadConfig();
     if (!config.has_value()) {
         return 1;
     }
+    std::shared_ptr<floral::device::service::VideoEncoderControl> videoControl;
     std::shared_ptr<floral::device::display::FrameConsumerBackend> backend =
-            floral::device::service::CreateVideoFrameConsumerBackend(*config);
+            floral::device::service::CreateVideoFrameConsumerBackend(*config, &videoControl);
     if (backend == nullptr) {
         LOG(ERROR) << "failed to create the FloralDevice video backend";
+        return 1;
+    }
+    if (videoControl == nullptr) {
+        LOG(ERROR) << "video backend does not expose runtime encoder control";
         return 1;
     }
 
     auto frameService = ndk::SharedRefBase::make<floral::device::display::FrameConsumerService>(
             std::move(backend));
-    auto topologyStateService =
-            ndk::SharedRefBase::make<floral::device::display::topology::DisplayTopologyStateService>();
-    auto topologyController = std::make_shared<floral::device::display::topology::DisplayTopologyController>(
-            topologyStateService);
+    auto audioPcmService =
+            ndk::SharedRefBase::make<floral::device::audio::AudioPcmSinkService>(audioSession);
+    auto topologyStateService = ndk::SharedRefBase::make<
+            floral::device::display::topology::DisplayTopologyStateService>();
+    auto topologyController =
+            std::make_shared<floral::device::display::topology::DisplayTopologyController>(
+                    topologyStateService);
     auto topologyControlHandler =
             std::make_shared<floral::device::display::topology::DisplayTopologyControlHandler>(
                     topologyController);
+    auto videoControlHandler =
+            std::make_shared<floral::device::service::VideoEncoderControlHandler>(videoControl);
+    auto audioControlHandler =
+            std::make_shared<floral::device::service::AudioEncoderControlHandler>(audioSession);
+    auto deviceControlHandler = std::make_shared<floral::device::control::DeviceControlHandler>(
+            std::move(topologyControlHandler), std::move(audioControlHandler),
+            std::move(videoControlHandler));
+    const std::string audioPcmInstance =
+            std::string(aidl::floral::device::audio::IAudioPcmSink::descriptor) + "/default";
     const std::string frameInstance =
             std::string(aidl::floral::device::display::IFrameConsumer::descriptor) + "/default";
     const std::string topologyStateInstance =
-            std::string(aidl::floral::display::topology::IDisplayTopologyState::descriptor) +
+            std::string(
+                    aidl::floral::device::display::topology::IDisplayTopologyState::descriptor) +
             "/default";
 
     ABinderProcess_setThreadPoolMaxThreadCount(4);
@@ -130,6 +172,12 @@ int main(int argc, char** argv) {
             AServiceManager_addService(frameService->asBinder().get(), frameInstance.c_str());
     if (status != STATUS_OK) {
         LOG(ERROR) << "failed to register " << frameInstance << ": binder status " << status;
+        return 1;
+    }
+    status =
+            AServiceManager_addService(audioPcmService->asBinder().get(), audioPcmInstance.c_str());
+    if (status != STATUS_OK) {
+        LOG(ERROR) << "failed to register " << audioPcmInstance << ": binder status " << status;
         return 1;
     }
     status = AServiceManager_addService(topologyStateService->asBinder().get(),
@@ -143,13 +191,13 @@ int main(int argc, char** argv) {
     std::string controlError;
     std::unique_ptr<floral::device::control::HostControlChannel> controlChannel =
             floral::device::control::HostControlChannel::Create(
-                    LoadControlConfig(), std::move(topologyControlHandler), &controlError);
+                    LoadControlConfig(), std::move(deviceControlHandler), &controlError);
     if (controlChannel == nullptr) {
         LOG(ERROR) << "failed to start the host control channel: " << controlError;
         return 1;
     }
 
-    LOG(INFO) << frameInstance << " and " << topologyStateInstance
+    LOG(INFO) << frameInstance << ", " << audioPcmInstance << " and " << topologyStateInstance
               << " are ready; host control channel started";
     ABinderProcess_joinThreadPool();
     LOG(ERROR) << "Binder thread pool exited unexpectedly";

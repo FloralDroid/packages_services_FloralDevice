@@ -115,7 +115,8 @@ bool SendTopologyRequest(int socketFd, uint32_t requestId,
         return false;
     }
     ControlPacketHeader header;
-    header.message_type = static_cast<uint16_t>(ControlMessageType::kReplaceDisplayTopologyRequest);
+    header.command_id = static_cast<uint16_t>(ControlCommandId::kReplaceDisplayTopology);
+    header.route_kind = MakeFhc1RouteKind(ControlPacketKind::kRequest);
     header.request_id = requestId;
     header.payload_size = static_cast<uint32_t>(payload.size());
     SerializedControlPacketHeader serialized{};
@@ -132,8 +133,8 @@ bool ReadTopologyResponse(int socketFd, uint32_t expectedRequestId, TopologyUpda
     ControlPacketHeader header;
     std::string error;
     if (!ParseControlPacketHeader(serialized, &header, &error) ||
-        header.message_type !=
-                static_cast<uint16_t>(ControlMessageType::kReplaceDisplayTopologyResponse) ||
+        header.command_id != static_cast<uint16_t>(ControlCommandId::kReplaceDisplayTopology) ||
+        header.route_kind != MakeFhc1RouteKind(ControlPacketKind::kResponse) ||
         header.request_id != expectedRequestId) {
         return false;
     }
@@ -194,13 +195,13 @@ TEST(HostControlChannelTest, ClearsExternalDisplaysWhenAuthorityLeaseExpires) {
     ASSERT_TRUE(ReadTopologyResponse(sockets[1].get(), 7, &update));
     EXPECT_EQ(update.result, TopologyUpdateResult::kApplied);
 
-    aidl::floral::display::topology::TopologySnapshot snapshot;
+    aidl::floral::device::display::topology::TopologySnapshot snapshot;
     ASSERT_TRUE(stateService->getSnapshot(&snapshot).isOk());
     ASSERT_EQ(snapshot.externalDisplays.size(), 1u);
     sockets[1].reset();
 
     ASSERT_TRUE(WaitUntil([&stateService]() {
-        aidl::floral::display::topology::TopologySnapshot current;
+        aidl::floral::device::display::topology::TopologySnapshot current;
         return stateService->getSnapshot(&current).isOk() && current.externalDisplays.empty();
     }));
     ASSERT_TRUE(stateService->getSnapshot(&snapshot).isOk());
@@ -232,7 +233,7 @@ TEST(HostControlChannelTest, ReconnectedSnapshotCancelsPendingLeaseWithoutHotplu
     EXPECT_EQ(update.generation, 2u);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(140));
-    aidl::floral::display::topology::TopologySnapshot snapshot;
+    aidl::floral::device::display::topology::TopologySnapshot snapshot;
     ASSERT_TRUE(stateService->getSnapshot(&snapshot).isOk());
     EXPECT_EQ(snapshot.generation, 2);
     ASSERT_EQ(snapshot.externalDisplays.size(), 1u);

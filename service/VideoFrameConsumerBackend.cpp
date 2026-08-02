@@ -20,8 +20,11 @@
 
 #include <android-base/logging.h>
 
+#include <poll.h>
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
+#include <cstring>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -29,6 +32,9 @@
 #include <utility>
 
 namespace floral::device::service {
+namespace stream = ::floral::stream;
+namespace session = ::floral::stream::session;
+namespace transport = ::floral::stream::transport;
 namespace {
 
 using AidlFrameStatus = aidl::floral::device::display::FrameStatus;
@@ -39,10 +45,52 @@ uint32_t NextGeneration(uint32_t generation) {
     return generation >= kMaximumGeneration ? 1 : generation + 1;
 }
 
-class VideoFrameConsumerBackend final : public display::FrameConsumerBackend {
+bool WaitForAcquireFence(android::base::unique_fd* fence, std::string* error) {
+    if (fence == nullptr || !fence->ok()) {
+        return true;
+    }
+    pollfd descriptor{};
+    descriptor.fd = fence->get();
+    descriptor.events = POLLIN;
+    int result = 0;
+    do {
+        result = poll(&descriptor, 1, 5'000);
+    } while (result < 0 && errno == EINTR);
+    fence->reset();
+    if (result > 0) {
+        return true;
+    }
+    if (result == 0) {
+        if (error != nullptr) {
+            *error = "frame acquire fence did not signal within 5000 ms";
+        }
+        return false;
+    }
+    if (error != nullptr) {
+        *error = std::string("polling frame acquire fence failed: ") + std::strerror(errno);
+    }
+    return false;
+}
+
+stream::VideoGeometry GeometryForCodedResolution(const stream::VideoGeometry& current,
+                                                 uint32_t codedWidth, uint32_t codedHeight) {
+    stream::VideoGeometry geometry = current;
+    geometry.coded_width = codedWidth;
+    geometry.coded_height = codedHeight;
+    return geometry;
+}
+
+bool IsResolutionWithinBounds(uint32_t width, uint32_t height) {
+    return width >= 320 && height >= 320 && width <= 7680 && height <= 4320;
+}
+
+class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
+                                        public VideoEncoderControl {
   public:
     explicit VideoFrameConsumerBackend(VideoFrameConsumerBackendConfig config)
-        : config_(std::move(config)), next_reconnect_(std::chrono::steady_clock::now()) {}
+        : config_(std::move(config)),
+          desired_session_config_(config_.session_config),
+          next_reconnect_(std::chrono::steady_clock::now()) {}
 
     display::DisplayConsumerStreamState GetStreamState(uint64_t displayId) override {
         std::lock_guard lock(mutex_);
@@ -95,11 +143,24 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend {
         }
 
         std::string error;
+        if (ShouldDropFrameLocked(request.presentation_time_nanos)) {
+            // A dropped frame still owns the source buffer until its acquire
+            // fence signals. Returning an empty release fence is then safe.
+            if (!WaitForAcquireFence(&request.acquire_fence, &error)) {
+                LOG(ERROR) << "failed to retire dropped display frame " << request.source_sequence
+                           << ": " << error;
+                result.status = AidlFrameStatus::INTERNAL_ERROR;
+                return result;
+            }
+            result.status = AidlFrameStatus::ACCEPTED;
+            DrainOutputLocked();
+            return result;
+        }
         const uint64_t frameSubmitTimeNanos =
                 request.frame_submit_time_nanos > 0
                         ? static_cast<uint64_t>(request.frame_submit_time_nanos)
                         : 0;
-        codec::FrameCopyResult copied = session_->SubmitFrame(
+        stream::codec::FrameCopyResult copied = session_->SubmitFrame(
                 buffer->second, std::move(request.acquire_fence), request.presentation_time_nanos,
                 frameSubmitTimeNanos, &error);
         if (!copied.success) {
@@ -113,6 +174,134 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend {
         result.release_fence = std::move(copied.release_fence);
         DrainOutputLocked();
         return result;
+    }
+
+    bool ApplyVideoEncoderConfig(const VideoEncoderConfigUpdate& update,
+                                 VideoEncoderRuntimeState* state, VideoEncoderConfigResult* result,
+                                 std::string* error) override {
+        std::lock_guard lock(mutex_);
+        if (state == nullptr || result == nullptr) {
+            if (error != nullptr) {
+                *error = "video encoder runtime state output is null";
+            }
+            return false;
+        }
+        if (update.display_id != config_.display_id ||
+            update.stream_id != desired_session_config_.stream_id) {
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kNoActiveStream;
+            return true;
+        }
+
+        if ((update.fields & ~kKnownVideoEncoderConfigFields) != 0 || update.fields == 0) {
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kInvalidConfig;
+            return true;
+        }
+        if ((update.fields & kVideoEncoderConfigBitrate) != 0 &&
+            (update.bitrate_bps < 100'000 || update.bitrate_bps > 100'000'000)) {
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kInvalidConfig;
+            return true;
+        }
+        if ((update.fields & kVideoEncoderConfigFrameRate) != 0 &&
+            (update.frame_rate == 0 || update.frame_rate > 60)) {
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kInvalidConfig;
+            return true;
+        }
+        if ((update.fields & kVideoEncoderConfigResolution) != 0 &&
+            !IsResolutionWithinBounds(update.coded_width, update.coded_height)) {
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kInvalidConfig;
+            return true;
+        }
+        if ((update.fields & kVideoEncoderConfigIFrameInterval) != 0 &&
+            (update.i_frame_interval_seconds == 0 || update.i_frame_interval_seconds > 60)) {
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kInvalidConfig;
+            return true;
+        }
+        if ((update.fields & kVideoEncoderConfigCodec) != 0 && update.codec_id != 1) {
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kUnsupported;
+            return true;
+        }
+        if ((update.fields & kVideoEncoderConfigBackend) != 0 &&
+            update.backend != stream::codec::EncoderBackendType::kMediaCodecSoftware &&
+            update.backend != stream::codec::EncoderBackendType::kFfmpegVaapi) {
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kUnsupported;
+            return true;
+        }
+
+        session::VideoStreamSessionConfig candidate = desired_session_config_;
+        const uint32_t oldBitrate = candidate.encoder.bitrate_bps;
+        bool structuralChange = false;
+        if ((update.fields & kVideoEncoderConfigBitrate) != 0) {
+            candidate.encoder.bitrate_bps = update.bitrate_bps;
+        }
+        if ((update.fields & kVideoEncoderConfigFrameRate) != 0) {
+            structuralChange =
+                    structuralChange || candidate.encoder.frame_rate != update.frame_rate;
+            candidate.encoder.frame_rate = update.frame_rate;
+        }
+        if ((update.fields & kVideoEncoderConfigResolution) != 0) {
+            structuralChange = structuralChange ||
+                               candidate.geometry.coded_width != update.coded_width ||
+                               candidate.geometry.coded_height != update.coded_height;
+            candidate.geometry = GeometryForCodedResolution(candidate.geometry, update.coded_width,
+                                                            update.coded_height);
+            if (!stream::HasMatchingDisplayAspect(candidate.geometry)) {
+                FillRuntimeStateLocked(state);
+                *result = VideoEncoderConfigResult::kInvalidConfig;
+                return true;
+            }
+            candidate.encoder.width = update.coded_width;
+            candidate.encoder.height = update.coded_height;
+        }
+        if ((update.fields & kVideoEncoderConfigIFrameInterval) != 0) {
+            structuralChange = structuralChange || candidate.encoder.i_frame_interval_seconds !=
+                                                           update.i_frame_interval_seconds;
+            candidate.encoder.i_frame_interval_seconds = update.i_frame_interval_seconds;
+        }
+        if ((update.fields & kVideoEncoderConfigBackend) != 0) {
+            structuralChange = structuralChange || candidate.encoder.backend != update.backend;
+            candidate.encoder.backend = update.backend;
+        }
+        desired_session_config_ = candidate;
+        if (structuralChange) {
+            if (session_ != nullptr) {
+                MarkSessionForResetLocked("video encoder configuration changed");
+            }
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kPending;
+            return true;
+        }
+
+        if ((update.fields & kVideoEncoderConfigBitrate) != 0 &&
+            candidate.encoder.bitrate_bps != oldBitrate) {
+            if (session_ != nullptr && !reset_required_ && session_->transport_connected()) {
+                if (!session_->SetBitrate(candidate.encoder.bitrate_bps, error)) {
+                    desired_session_config_.encoder.bitrate_bps = oldBitrate;
+                    MarkSessionForResetLocked(error != nullptr && !error->empty()
+                                                      ? *error
+                                                      : "runtime bitrate update failed");
+                    return false;
+                }
+                FillRuntimeStateLocked(state);
+                *result = VideoEncoderConfigResult::kApplied;
+                return true;
+            }
+            FillRuntimeStateLocked(state);
+            *result = VideoEncoderConfigResult::kPending;
+            return true;
+        }
+
+        FillRuntimeStateLocked(state);
+        *result = state->pending ? VideoEncoderConfigResult::kPending
+                                 : VideoEncoderConfigResult::kApplied;
+        return true;
     }
 
   private:
@@ -153,9 +342,10 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend {
             return;
         }
 
-        session::VideoStreamSessionConfig sessionConfig = config_.session_config;
+        session::VideoStreamSessionConfig sessionConfig = desired_session_config_;
         const uint32_t candidateGeneration = NextGeneration(generation_);
         sessionConfig.generation = candidateGeneration;
+        sessionConfig.initial_discontinuity = generation_ != 0;
         std::unique_ptr<session::VideoStreamSession> session =
                 session::VideoStreamSession::Create(sessionConfig, std::move(sink), &error);
         if (session == nullptr) {
@@ -166,8 +356,9 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend {
         generation_ = candidateGeneration;
         session_ = std::move(session);
         buffers_.clear();
+        next_frame_presentation_time_nanos_ = 0;
         last_connection_error_.clear();
-        const VideoGeometry& geometry = sessionConfig.geometry;
+        const stream::VideoGeometry& geometry = sessionConfig.geometry;
         LOG(INFO) << "video stream generation " << generation_ << " active: logical "
                   << geometry.logical_width << "x" << geometry.logical_height << ", coded "
                   << geometry.coded_width << "x" << geometry.coded_height << ", display rotation "
@@ -198,6 +389,43 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend {
         LOG(WARNING) << "video stream generation " << generation_ << " became inactive: " << error;
     }
 
+    bool ShouldDropFrameLocked(int64_t presentationTimeNanos) {
+        if (presentationTimeNanos <= 0 || desired_session_config_.encoder.frame_rate == 0) {
+            return false;
+        }
+        const uint64_t timestamp = static_cast<uint64_t>(presentationTimeNanos);
+        const uint64_t frameInterval =
+                1'000'000'000ULL / desired_session_config_.encoder.frame_rate;
+        if (next_frame_presentation_time_nanos_ == 0 ||
+            timestamp + frameInterval < next_frame_presentation_time_nanos_) {
+            next_frame_presentation_time_nanos_ = timestamp + frameInterval;
+            return false;
+        }
+        if (timestamp < next_frame_presentation_time_nanos_) {
+            return true;
+        }
+        const uint64_t intervals =
+                (timestamp - next_frame_presentation_time_nanos_) / frameInterval + 1;
+        if (intervals >
+            (std::numeric_limits<uint64_t>::max() - next_frame_presentation_time_nanos_) /
+                    frameInterval) {
+            next_frame_presentation_time_nanos_ = timestamp + frameInterval;
+        } else {
+            next_frame_presentation_time_nanos_ += intervals * frameInterval;
+        }
+        return false;
+    }
+
+    void FillRuntimeStateLocked(VideoEncoderRuntimeState* state) const {
+        state->generation = generation_;
+        state->pending = reset_required_ || session_ == nullptr || !session_->transport_connected();
+        state->encoder = desired_session_config_.encoder;
+        state->geometry = desired_session_config_.geometry;
+        if (session_ != nullptr && !reset_required_ && session_->transport_connected()) {
+            state->encoder = session_->encoder_config();
+        }
+    }
+
     void LogConnectionFailureLocked(const std::string& error) {
         if (error == last_connection_error_) {
             return;
@@ -207,13 +435,16 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend {
                   << error;
     }
 
-    // Immutable runtime configuration and serialized session state.
+    // Socket/display identity is immutable; the desired encoder configuration
+    // is replaced atomically under mutex_ before a new generation is created.
     const VideoFrameConsumerBackendConfig config_;
+    session::VideoStreamSessionConfig desired_session_config_;
     std::mutex mutex_;
     std::unique_ptr<session::VideoStreamSession> session_;
     std::unordered_map<uint64_t, uint64_t> buffers_;
     uint32_t generation_ = 0;
     bool reset_required_ = false;
+    uint64_t next_frame_presentation_time_nanos_ = 0;
 
     // Reconnect pacing keeps the HWC state poll from producing a tight loop.
     std::chrono::steady_clock::time_point next_reconnect_;
@@ -223,13 +454,22 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend {
 }  // namespace
 
 std::shared_ptr<display::FrameConsumerBackend> CreateVideoFrameConsumerBackend(
-        VideoFrameConsumerBackendConfig config) {
+        VideoFrameConsumerBackendConfig config,
+        std::shared_ptr<VideoEncoderControl>* encoderControl) {
+    if (encoderControl != nullptr) {
+        encoderControl->reset();
+    }
     if (config.video_socket_path.empty() ||
         config.reconnect_interval <= std::chrono::milliseconds::zero()) {
         LOG(ERROR) << "video frame consumer backend configuration is invalid";
         return nullptr;
     }
-    return std::make_shared<VideoFrameConsumerBackend>(std::move(config));
+    std::shared_ptr<VideoFrameConsumerBackend> backend =
+            std::make_shared<VideoFrameConsumerBackend>(std::move(config));
+    if (encoderControl != nullptr) {
+        *encoderControl = backend;
+    }
+    return backend;
 }
 
 }  // namespace floral::device::service

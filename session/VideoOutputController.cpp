@@ -167,7 +167,10 @@ VideoOutputProcessResult VideoOutputController::SendAccessPoint(codec::EncodedPa
         packets.push_back(MakePacket(*codec_config_, 0, 0));
     }
     const uint32_t additionalFlags =
-            state_ == VideoOutputState::kRecovering ? transport::kVideoPacketDiscontinuity : 0;
+            state_ == VideoOutputState::kRecovering ||
+                            (state_ == VideoOutputState::kStarting && config_.initial_discontinuity)
+                    ? transport::kVideoPacketDiscontinuity
+                    : 0;
     packets.push_back(MakePacket(std::move(packet), additionalFlags, submitTimeNs));
     const size_t packetCount = packets.size();
     transport::VideoEnqueueResult enqueue = sink->SubmitBatch(std::move(packets), error);

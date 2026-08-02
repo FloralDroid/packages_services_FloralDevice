@@ -21,7 +21,6 @@
 #include <aidl/floral/device/display/topology/BnDisplayTopologyState.h>
 #include <aidl/floral/device/display/topology/IDisplayTopologyListener.h>
 #include <aidl/floral/device/display/topology/TopologySnapshot.h>
-#include <android/binder_ibinder.h>
 
 #include <memory>
 #include <mutex>
@@ -32,29 +31,26 @@ namespace floral::device::display::topology {
 class DisplayTopologyController;
 
 class DisplayTopologyStateService final
-    : public aidl::floral::display::topology::BnDisplayTopologyState {
+    : public aidl::floral::device::display::topology::BnDisplayTopologyState {
   public:
-    DisplayTopologyStateService();
-    ~DisplayTopologyStateService() override = default;
+    DisplayTopologyStateService() = default;
 
     ndk::ScopedAStatus getSnapshot(
-            aidl::floral::display::topology::TopologySnapshot* result) override;
+            aidl::floral::device::display::topology::TopologySnapshot* result) override;
     ndk::ScopedAStatus registerListener(
-            const std::shared_ptr<aidl::floral::display::topology::IDisplayTopologyListener>&
-                    listener) override;
+            const std::shared_ptr<
+                    aidl::floral::device::display::topology::IDisplayTopologyListener>& listener)
+            override;
     ndk::ScopedAStatus unregisterListener(
-            const std::shared_ptr<aidl::floral::display::topology::IDisplayTopologyListener>&
-                    listener) override;
+            const std::shared_ptr<
+                    aidl::floral::device::display::topology::IDisplayTopologyListener>& listener)
+            override;
 
   private:
     friend class DisplayTopologyController;
 
-    using Listener = aidl::floral::display::topology::IDisplayTopologyListener;
-    using Snapshot = aidl::floral::display::topology::TopologySnapshot;
-
-    struct DeathRecipientDeleter {
-        void operator()(AIBinder_DeathRecipient* recipient) const;
-    };
+    using Listener = aidl::floral::device::display::topology::IDisplayTopologyListener;
+    using Snapshot = aidl::floral::device::display::topology::TopologySnapshot;
 
     TopologyUpdate ReplaceExternalDisplays(std::vector<ManagedPhysicalDisplay> displays);
 
@@ -65,10 +61,8 @@ class DisplayTopologyStateService final
                                   const std::vector<ManagedPhysicalDisplay>& displays);
     static bool SameBinder(const std::shared_ptr<Listener>& left,
                            const std::shared_ptr<Listener>& right);
-    static void OnListenerBinderDied(void* cookie);
 
     void RemoveListener(const std::shared_ptr<Listener>& listener);
-    void RemoveDeadListeners();
     void NotifyListeners(const Snapshot& snapshot,
                          const std::vector<std::shared_ptr<Listener>>& listeners);
 
@@ -77,7 +71,6 @@ class DisplayTopologyStateService final
     uint64_t generation_ = 1;
     std::vector<ManagedPhysicalDisplay> displays_;
     std::vector<std::shared_ptr<Listener>> listeners_;
-    std::unique_ptr<AIBinder_DeathRecipient, DeathRecipientDeleter> listener_death_recipient_;
 };
 
 }  // namespace floral::device::display::topology

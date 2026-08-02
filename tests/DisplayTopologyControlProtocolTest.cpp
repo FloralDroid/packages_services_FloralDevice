@@ -107,8 +107,9 @@ TEST(DisplayTopologyControlProtocolTest, HandlerPublishesSnapshotAndCorrelatesRe
     DisplayTopologyControlHandler handler(controller);
 
     control::ControlRequest request;
-    request.header.message_type =
-            static_cast<uint16_t>(control::ControlMessageType::kReplaceDisplayTopologyRequest);
+    request.header.command_id =
+            static_cast<uint16_t>(control::ControlCommandId::kReplaceDisplayTopology);
+    request.header.route_kind = control::MakeFhc1RouteKind(control::ControlPacketKind::kRequest);
     request.header.request_id = 42;
     std::string error;
     ASSERT_TRUE(SerializeReplaceDisplayTopologyRequest({ExternalDisplay(2, 1)}, &request.payload,
@@ -118,8 +119,10 @@ TEST(DisplayTopologyControlProtocolTest, HandlerPublishesSnapshotAndCorrelatesRe
 
     control::ControlResponse response;
     ASSERT_TRUE(handler.Handle(request, &response, &error)) << error;
-    EXPECT_EQ(response.header.message_type,
-              static_cast<uint16_t>(control::ControlMessageType::kReplaceDisplayTopologyResponse));
+    EXPECT_EQ(response.header.command_id,
+              static_cast<uint16_t>(control::ControlCommandId::kReplaceDisplayTopology));
+    EXPECT_EQ(response.header.route_kind,
+              control::MakeFhc1RouteKind(control::ControlPacketKind::kResponse));
     EXPECT_EQ(response.header.request_id, 42u);
     EXPECT_TRUE(response.refreshes_authority_lease);
 
@@ -128,7 +131,7 @@ TEST(DisplayTopologyControlProtocolTest, HandlerPublishesSnapshotAndCorrelatesRe
     EXPECT_EQ(update.result, TopologyUpdateResult::kApplied);
     EXPECT_EQ(update.generation, 2u);
 
-    aidl::floral::display::topology::TopologySnapshot snapshot;
+    aidl::floral::device::display::topology::TopologySnapshot snapshot;
     ASSERT_TRUE(stateService->getSnapshot(&snapshot).isOk());
     ASSERT_EQ(snapshot.externalDisplays.size(), 1u);
     EXPECT_EQ(snapshot.externalDisplays[0].displayId, 2);
@@ -145,19 +148,22 @@ TEST(DisplayTopologyControlProtocolTest, HandlerRejectsZeroRequestIdWithoutMutat
     DisplayTopologyControlHandler handler(controller);
 
     control::ControlRequest request;
-    request.header.message_type =
-            static_cast<uint16_t>(control::ControlMessageType::kReplaceDisplayTopologyRequest);
+    request.header.command_id =
+            static_cast<uint16_t>(control::ControlCommandId::kReplaceDisplayTopology);
+    request.header.route_kind = control::MakeFhc1RouteKind(control::ControlPacketKind::kRequest);
     ASSERT_TRUE(SerializeReplaceDisplayTopologyRequest({ExternalDisplay(2, 1)}, &request.payload,
                                                        nullptr));
     request.header.payload_size = static_cast<uint32_t>(request.payload.size());
 
     control::ControlResponse response;
     ASSERT_TRUE(handler.Handle(request, &response, nullptr));
-    EXPECT_EQ(response.header.message_type,
-              static_cast<uint16_t>(control::ControlMessageType::kErrorResponse));
+    EXPECT_EQ(response.header.command_id,
+              static_cast<uint16_t>(control::ControlCommandId::kGenericError));
+    EXPECT_EQ(response.header.route_kind,
+              control::MakeFhc1RouteKind(control::ControlPacketKind::kErrorResponse));
     EXPECT_FALSE(response.refreshes_authority_lease);
 
-    aidl::floral::display::topology::TopologySnapshot snapshot;
+    aidl::floral::device::display::topology::TopologySnapshot snapshot;
     ASSERT_TRUE(stateService->getSnapshot(&snapshot).isOk());
     EXPECT_EQ(snapshot.generation, 1);
     EXPECT_TRUE(snapshot.externalDisplays.empty());

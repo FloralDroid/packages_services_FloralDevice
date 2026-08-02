@@ -287,9 +287,9 @@ bool SerializeReplaceDisplayTopologyResponse(const TopologyUpdate& update, uint3
     response->payload.assign(kTopologyResponseSize, 0);
     WriteUint32(response->payload.data(), static_cast<uint32_t>(update.result));
     WriteUint64(response->payload.data() + 8, update.generation);
-    response->header.message_type =
-            static_cast<uint16_t>(control::ControlMessageType::kReplaceDisplayTopologyResponse);
-    response->header.flags = 0;
+    response->header.command_id =
+            static_cast<uint16_t>(control::ControlCommandId::kReplaceDisplayTopology);
+    response->header.route_kind = control::MakeFhc1RouteKind(control::ControlPacketKind::kResponse);
     response->header.request_id = request_id;
     response->header.payload_size = static_cast<uint32_t>(response->payload.size());
     response->refreshes_authority_lease = update.result == TopologyUpdateResult::kApplied ||

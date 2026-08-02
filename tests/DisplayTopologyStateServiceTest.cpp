@@ -29,23 +29,24 @@
 namespace floral::device::display::topology {
 namespace {
 
-class RecordingListener final : public aidl::floral::display::topology::BnDisplayTopologyListener {
+class RecordingListener final
+    : public aidl::floral::device::display::topology::BnDisplayTopologyListener {
   public:
     ndk::ScopedAStatus onTopologyChanged(
-            const aidl::floral::display::topology::TopologySnapshot& snapshot) override {
+            const aidl::floral::device::display::topology::TopologySnapshot& snapshot) override {
         std::lock_guard lock(mutex_);
         snapshots_.push_back(snapshot);
         return ndk::ScopedAStatus::ok();
     }
 
-    std::vector<aidl::floral::display::topology::TopologySnapshot> Snapshots() const {
+    std::vector<aidl::floral::device::display::topology::TopologySnapshot> Snapshots() const {
         std::lock_guard lock(mutex_);
         return snapshots_;
     }
 
   private:
     mutable std::mutex mutex_;
-    std::vector<aidl::floral::display::topology::TopologySnapshot> snapshots_;
+    std::vector<aidl::floral::device::display::topology::TopologySnapshot> snapshots_;
 };
 
 ManagedPhysicalDisplay ExternalDisplay(uint64_t id, uint8_t port) {
@@ -112,7 +113,7 @@ TEST(DisplayTopologyStateServiceTest, RejectsPrimaryAndConflictingDisplays) {
                       .result,
               TopologyUpdateResult::kDuplicatePort);
 
-    aidl::floral::display::topology::TopologySnapshot snapshot;
+    aidl::floral::device::display::topology::TopologySnapshot snapshot;
     ASSERT_TRUE(service->getSnapshot(&snapshot).isOk());
     EXPECT_EQ(snapshot.generation, 1);
     EXPECT_TRUE(snapshot.externalDisplays.empty());

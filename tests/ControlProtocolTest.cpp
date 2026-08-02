@@ -25,7 +25,7 @@ namespace {
 
 TEST(ControlProtocolTest, RoundTripsFixedHeader) {
     ControlPacketHeader source;
-    source.message_type = static_cast<uint16_t>(ControlMessageType::kReplaceDisplayTopologyRequest);
+    source.command_id = static_cast<uint16_t>(ControlCommandId::kReplaceDisplayTopology);
     source.request_id = 0x10203040;
     source.payload_size = 4096;
 
@@ -33,14 +33,14 @@ TEST(ControlProtocolTest, RoundTripsFixedHeader) {
     std::string error;
     ASSERT_TRUE(SerializeControlPacketHeader(source, &serialized, &error)) << error;
     EXPECT_EQ(serialized[0], 'F');
-    EXPECT_EQ(serialized[1], 'S');
+    EXPECT_EQ(serialized[1], 'H');
     EXPECT_EQ(serialized[2], 'C');
     EXPECT_EQ(serialized[3], '1');
 
     ControlPacketHeader parsed;
     ASSERT_TRUE(ParseControlPacketHeader(serialized, &parsed, &error)) << error;
-    EXPECT_EQ(parsed.message_type, source.message_type);
-    EXPECT_EQ(parsed.flags, 0);
+    EXPECT_EQ(parsed.command_id, source.command_id);
+    EXPECT_EQ(parsed.route_kind, MakeFhc1RouteKind(ControlPacketKind::kRequest));
     EXPECT_EQ(parsed.request_id, source.request_id);
     EXPECT_EQ(parsed.payload_size, source.payload_size);
 }
@@ -57,9 +57,9 @@ TEST(ControlProtocolTest, RejectsUnsupportedFramingAndOversizedPayload) {
     serialized[23] = 1;
     EXPECT_FALSE(ParseControlPacketHeader(serialized, &source, &error));
 
-    source.flags = 1;
+    source.route_kind = MakeFhc1RouteKind(ControlPacketKind::kRequest, 1);
     EXPECT_FALSE(SerializeControlPacketHeader(source, &serialized, &error));
-    source.flags = 0;
+    source.route_kind = MakeFhc1RouteKind(ControlPacketKind::kRequest);
     source.payload_size = kMaximumControlPayloadSize + 1;
     EXPECT_FALSE(SerializeControlPacketHeader(source, &serialized, &error));
 }
@@ -70,8 +70,8 @@ TEST(ControlProtocolTest, BuildsCorrelatedErrorResponse) {
     ASSERT_TRUE(SerializeControlErrorResponse(19, 0x2345, ControlError::kUnsupportedMessage,
                                               &response, &error))
             << error;
-    EXPECT_EQ(response.header.message_type,
-              static_cast<uint16_t>(ControlMessageType::kErrorResponse));
+    EXPECT_EQ(response.header.command_id, static_cast<uint16_t>(ControlCommandId::kGenericError));
+    EXPECT_EQ(response.header.route_kind, MakeFhc1RouteKind(ControlPacketKind::kErrorResponse));
     EXPECT_EQ(response.header.request_id, 19u);
     EXPECT_EQ(response.header.payload_size, 8u);
     EXPECT_EQ(response.payload.size(), 8u);

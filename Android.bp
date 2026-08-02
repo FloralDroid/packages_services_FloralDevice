@@ -37,6 +37,33 @@ aidl_interface {
 }
 
 aidl_interface {
+    name: "floral.device.audio",
+    // The HAL publishes PCM through this container-internal FMQ contract.
+    owner: "floraldroid",
+    vendor_available: true,
+    local_include_dir: "aidl",
+    srcs: [
+        "aidl/floral/device/audio/*.aidl",
+    ],
+    imports: [
+        "android.hardware.common-V2",
+        "android.hardware.common.fmq-V1",
+    ],
+    stability: "vintf",
+    backend: {
+        java: {
+            enabled: false,
+        },
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: true,
+        },
+    },
+}
+
+aidl_interface {
     name: "floral.device.display.topology",
     // External client transports adapt to this container-internal contract.
     owner: "floraldroid",
@@ -119,14 +146,61 @@ cc_library_static {
     defaults: ["floral_device_common_defaults"],
     vendor: true,
     srcs: [
+        "transport/AudioPacketProtocol.cpp",
         "transport/EncodedPacketAdapter.cpp",
+        "transport/HostAudioSink.cpp",
         "transport/HostVideoSink.cpp",
         "transport/VideoPacketProtocol.cpp",
     ],
     shared_libs: [
         "libbase",
+        "liblog",
         "libmediandk",
         "libnativewindow",
+    ],
+    export_include_dirs: ["include"],
+}
+
+cc_library_static {
+    name: "libfloral_device_audio_pcm",
+    vendor_available: true,
+    srcs: [
+        "audio/AudioPcmRecord.cpp",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    cpp_std: "c++17",
+    export_include_dirs: ["include"],
+}
+
+cc_library_static {
+    name: "libfloral_stream_audio",
+    defaults: ["floral_device_common_defaults"],
+    vendor: true,
+    srcs: [
+        "audio/AudioPcmSinkService.cpp",
+        "audio/AudioStreamSession.cpp",
+        "audio/OpusEncoder.cpp",
+        "service/AudioEncoderControlHandler.cpp",
+        "service/AudioEncoderControlProtocol.cpp",
+    ],
+    static_libs: [
+        "libfloral_device_audio_pcm",
+        "libfloral_hal_control",
+        "libfloral_stream_transport",
+    ],
+    shared_libs: [
+        "android.hardware.common-V2-ndk_platform",
+        "android.hardware.common.fmq-V1-ndk_platform",
+        "floral.device.audio-V1-ndk_platform",
+        "libbase",
+        "libbinder_ndk",
+        "libfmq",
+        "liblog",
+        "libopus",
     ],
     export_include_dirs: ["include"],
 }
@@ -213,6 +287,7 @@ cc_library_static {
     defaults: ["floral_device_common_defaults"],
     vendor_available: true,
     srcs: [
+        "control/DeviceControlHandler.cpp",
         "topology/DisplayTopologyController.cpp",
         "topology/DisplayTopologyControlHandler.cpp",
         "topology/DisplayTopologyControlProtocol.cpp",
@@ -233,21 +308,29 @@ cc_library_static {
     defaults: ["floral_device_common_defaults"],
     vendor: true,
     srcs: [
+        "service/VideoEncoderControlHandler.cpp",
+        "service/VideoEncoderControlProtocol.cpp",
         "service/VideoFrameConsumerBackend.cpp",
     ],
     static_libs: [
+        "libfloral_hal_control",
+        "libfloral_stream_audio",
         "libfloral_stream_session",
     ],
     shared_libs: [
+        "android.hardware.common.fmq-V1-ndk_platform",
         "android.hardware.common-V2-ndk_platform",
         "android.hardware.graphics.common-V2-ndk_platform",
         "floral.device.display-V1-ndk_platform",
+        "floral.device.audio-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
         "libEGL",
         "libGLESv2",
         "libmediandk",
         "libnativewindow",
+        "libfmq",
+        "libopus",
     ],
     export_include_dirs: ["include"],
 }
@@ -262,7 +345,9 @@ cc_binary {
     ],
     static_libs: [
         "libaidlcommonsupport",
+        "libfloral_device_audio_pcm",
         "libfloral_stream_codec",
+        "libfloral_stream_audio",
         "libfloral_hal_control",
         "libfloral_device_display_ingress",
         "libfloral_device_display_service",
@@ -272,8 +357,10 @@ cc_binary {
         "libfloral_stream_transport",
     ],
     shared_libs: [
+        "android.hardware.common.fmq-V1-ndk_platform",
         "android.hardware.common-V2-ndk_platform",
         "android.hardware.graphics.common-V2-ndk_platform",
+        "floral.device.audio-V1-ndk_platform",
         "floral.device.display-V1-ndk_platform",
         "floral.device.display.topology-V1-ndk_platform",
         "libbase",
@@ -283,11 +370,14 @@ cc_binary {
         "libGLESv2",
         "libmediandk",
         "libnativewindow",
+        "libfmq",
         "libfloral_ffmpeg_avcodec",
         "libfloral_ffmpeg_avutil",
         "libfloral_va_prebuilt",
         "libhardware",
         "liblog",
+        "libopus",
+        "libutils",
     ],
     init_rc: ["service/floral-device.rc"],
     vintf_fragments: ["service/floral-device.xml"],
@@ -329,7 +419,36 @@ cc_test {
 }
 
 cc_test {
-    name: "floral_device_display_tests",
+    name: "floral_stream_audio_tests",
+    defaults: ["floral_device_common_defaults"],
+    vendor: true,
+    srcs: [
+        "tests/AudioEncoderControlProtocolTest.cpp",
+        "tests/AudioPacketProtocolTest.cpp",
+        "tests/AudioPcmRecordTest.cpp",
+        "tests/OpusEncoderTest.cpp",
+    ],
+    static_libs: [
+        "libfloral_device_audio_pcm",
+        "libfloral_hal_control",
+        "libfloral_stream_audio",
+        "libfloral_stream_transport",
+    ],
+    shared_libs: [
+        "android.hardware.common-V2-ndk_platform",
+        "android.hardware.common.fmq-V1-ndk_platform",
+        "floral.device.audio-V1-ndk_platform",
+        "libbase",
+        "libbinder_ndk",
+        "libfmq",
+        "liblog",
+        "libopus",
+    ],
+    test_suites: ["device-tests"],
+}
+
+cc_test {
+    name: "floral_stream_display_tests",
     defaults: ["floral_device_common_defaults"],
     srcs: [
         "tests/ControlProtocolTest.cpp",

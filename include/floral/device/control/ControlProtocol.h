@@ -29,10 +29,33 @@ constexpr uint16_t kControlPacketVersion = 1;
 constexpr size_t kControlPacketHeaderSize = 24;
 constexpr uint32_t kMaximumControlPayloadSize = 64 * 1024;
 
-enum class ControlMessageType : uint16_t {
-    kErrorResponse = 0x8000,
-    kReplaceDisplayTopologyRequest = 0x0100,
-    kReplaceDisplayTopologyResponse = 0x8100,
+constexpr uint16_t kFhc1ControlPlane = 0x1000;
+constexpr uint16_t kControlPlaneMask = 0xf000;
+constexpr uint16_t kControlPacketKindMask = 0x0f00;
+constexpr uint16_t kControlPacketFlagsMask = 0x00ff;
+
+enum class ControlPacketKind : uint8_t {
+    kRequest = 0,
+    kResponse = 1,
+    kEvent = 2,
+    kErrorResponse = 3,
+};
+
+constexpr uint16_t MakeFhc1RouteKind(ControlPacketKind kind, uint8_t flags = 0) {
+    return static_cast<uint16_t>(kFhc1ControlPlane | (static_cast<uint16_t>(kind) << 8) | flags);
+}
+
+constexpr bool IsFhc1RouteKind(uint16_t route_kind, ControlPacketKind kind) {
+    return (route_kind & kControlPlaneMask) == kFhc1ControlPlane &&
+           (route_kind & kControlPacketKindMask) == (static_cast<uint16_t>(kind) << 8) &&
+           (route_kind & kControlPacketFlagsMask) == 0;
+}
+
+enum class ControlCommandId : uint16_t {
+    kGenericError = 0x0000,
+    kReplaceDisplayTopology = 0x0100,
+    kSetAudioEncoderConfig = 0x0200,
+    kSetVideoEncoderConfig = 0x0300,
 };
 
 enum class ControlError : uint32_t {
@@ -43,8 +66,8 @@ enum class ControlError : uint32_t {
 };
 
 struct ControlPacketHeader {
-    uint16_t message_type = 0;
-    uint16_t flags = 0;
+    uint16_t command_id = 0;
+    uint16_t route_kind = MakeFhc1RouteKind(ControlPacketKind::kRequest);
     uint32_t request_id = 0;
     uint32_t payload_size = 0;
 };
@@ -66,7 +89,7 @@ bool SerializeControlPacketHeader(const ControlPacketHeader& header,
                                   SerializedControlPacketHeader* output, std::string* error);
 bool ParseControlPacketHeader(const SerializedControlPacketHeader& input,
                               ControlPacketHeader* header, std::string* error);
-bool SerializeControlErrorResponse(uint32_t request_id, uint16_t failed_message_type,
+bool SerializeControlErrorResponse(uint32_t request_id, uint16_t failed_command_id,
                                    ControlError error_code, ControlResponse* response,
                                    std::string* error);
 

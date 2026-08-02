@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "floral-device-control"
+#define LOG_TAG "floral-hal-control"
 
 #include "floral/device/control/HostControlChannel.h"
 

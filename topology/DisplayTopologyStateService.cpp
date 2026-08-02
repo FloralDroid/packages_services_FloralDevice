@@ -35,16 +35,6 @@ constexpr uint32_t kMaximumRefreshRateHz = 60;
 
 }  // namespace
 
-void DisplayTopologyStateService::DeathRecipientDeleter::operator()(
-        AIBinder_DeathRecipient* recipient) const {
-    if (recipient != nullptr) {
-        AIBinder_DeathRecipient_delete(recipient);
-    }
-}
-
-DisplayTopologyStateService::DisplayTopologyStateService()
-    : listener_death_recipient_(AIBinder_DeathRecipient_new(&OnListenerBinderDied)) {}
-
 TopologyUpdate DisplayTopologyStateService::ReplaceExternalDisplays(
         std::vector<ManagedPhysicalDisplay> displays) {
     const auto rejected = [this](TopologyUpdateResult result) {
@@ -117,16 +107,6 @@ ndk::ScopedAStatus DisplayTopologyStateService::registerListener(
                                             return SameBinder(candidate, listener);
                                         });
         if (found == listeners_.end()) {
-            if (listener_death_recipient_ == nullptr) {
-                return ndk::ScopedAStatus::fromStatus(STATUS_NO_MEMORY);
-            }
-            const binder_status_t linkStatus = AIBinder_linkToDeath(
-                    listener->asBinder().get(), listener_death_recipient_.get(), this);
-            // In-process test listeners are local binders and cannot die
-            // independently from this service.
-            if (linkStatus != STATUS_OK && linkStatus != STATUS_INVALID_OPERATION) {
-                return ndk::ScopedAStatus::fromStatus(linkStatus);
-            }
             listeners_.push_back(listener);
         }
         snapshot = BuildSnapshot(generation_, displays_);
@@ -183,7 +163,7 @@ DisplayTopologyStateService::Snapshot DisplayTopologyStateService::BuildSnapshot
     snapshot.generation = static_cast<int64_t>(generation);
     snapshot.externalDisplays.reserve(displays.size());
     for (const ManagedPhysicalDisplay& display : displays) {
-        aidl::floral::display::topology::PhysicalDisplaySpec aidlDisplay;
+        aidl::floral::device::display::topology::PhysicalDisplaySpec aidlDisplay;
         aidlDisplay.displayId = static_cast<int64_t>(display.display_id);
         aidlDisplay.port = static_cast<int32_t>(display.port);
         aidlDisplay.width = static_cast<int32_t>(display.width);
@@ -203,36 +183,11 @@ bool DisplayTopologyStateService::SameBinder(const std::shared_ptr<Listener>& le
     return left != nullptr && right != nullptr && left->asBinder().get() == right->asBinder().get();
 }
 
-void DisplayTopologyStateService::OnListenerBinderDied(void* cookie) {
-    if (cookie != nullptr) {
-        static_cast<DisplayTopologyStateService*>(cookie)->RemoveDeadListeners();
-    }
-}
-
 void DisplayTopologyStateService::RemoveListener(const std::shared_ptr<Listener>& listener) {
-    bool removed = false;
-    {
-        std::lock_guard lock(mutex_);
-        const auto retained =
-                std::remove_if(listeners_.begin(), listeners_.end(),
-                               [&listener](const std::shared_ptr<Listener>& candidate) {
-                                   return SameBinder(candidate, listener);
-                               });
-        removed = retained != listeners_.end();
-        listeners_.erase(retained, listeners_.end());
-    }
-    if (removed && listener != nullptr && listener_death_recipient_ != nullptr) {
-        (void)AIBinder_unlinkToDeath(listener->asBinder().get(), listener_death_recipient_.get(),
-                                     this);
-    }
-}
-
-void DisplayTopologyStateService::RemoveDeadListeners() {
     std::lock_guard lock(mutex_);
     listeners_.erase(std::remove_if(listeners_.begin(), listeners_.end(),
-                                    [](const std::shared_ptr<Listener>& listener) {
-                                        return listener == nullptr ||
-                                               !AIBinder_isAlive(listener->asBinder().get());
+                                    [&listener](const std::shared_ptr<Listener>& candidate) {
+                                        return SameBinder(candidate, listener);
                                     }),
                      listeners_.end());
 }

@@ -14,22 +14,19 @@
  * limitations under the License.
  */
 
-#include "floral/device/display/topology/DisplayTopologyControlHandler.h"
+#include "floral/device/service/VideoEncoderControlHandler.h"
 
-#include "floral/device/display/topology/DisplayTopologyControlProtocol.h"
-#include "floral/device/display/topology/DisplayTopologyController.h"
+#include "floral/device/service/VideoEncoderControlProtocol.h"
 
 #include <utility>
-#include <vector>
 
-namespace floral::device::display::topology {
+namespace floral::device::service {
 
-DisplayTopologyControlHandler::DisplayTopologyControlHandler(
-        std::shared_ptr<DisplayTopologyController> controller)
-    : controller_(std::move(controller)) {}
+VideoEncoderControlHandler::VideoEncoderControlHandler(std::shared_ptr<VideoEncoderControl> control)
+    : control_(std::move(control)) {}
 
-bool DisplayTopologyControlHandler::Handle(const control::ControlRequest& request,
-                                           control::ControlResponse* response, std::string* error) {
+bool VideoEncoderControlHandler::Handle(const control::ControlRequest& request,
+                                        control::ControlResponse* response, std::string* error) {
     if (response == nullptr) {
         if (error != nullptr) {
             *error = "control response output is null";
@@ -44,32 +41,38 @@ bool DisplayTopologyControlHandler::Handle(const control::ControlRequest& reques
     if (!control::IsFhc1RouteKind(request.header.route_kind,
                                   control::ControlPacketKind::kRequest) ||
         request.header.command_id !=
-                static_cast<uint16_t>(control::ControlCommandId::kReplaceDisplayTopology)) {
+                static_cast<uint16_t>(control::ControlCommandId::kSetVideoEncoderConfig)) {
         return control::SerializeControlErrorResponse(
                 request.header.request_id, request.header.command_id,
                 control::ControlError::kUnsupportedMessage, response, error);
     }
 
-    std::vector<ManagedPhysicalDisplay> displays;
-    if (!ParseReplaceDisplayTopologyRequest(request.payload, &displays, error)) {
+    VideoEncoderConfigUpdate update;
+    if (!ParseVideoEncoderConfigRequest(request.payload, &update, error)) {
         return control::SerializeControlErrorResponse(
                 request.header.request_id, request.header.command_id,
                 control::ControlError::kMalformedRequest, response, error);
     }
-    if (controller_ == nullptr) {
+    if (control_ == nullptr) {
         return control::SerializeControlErrorResponse(
                 request.header.request_id, request.header.command_id,
                 control::ControlError::kInternalError, response, error);
     }
-    const TopologyUpdate update = controller_->ReplaceExternalDisplays(std::move(displays));
-    return SerializeReplaceDisplayTopologyResponse(update, request.header.request_id, response,
-                                                   error);
-}
 
-void DisplayTopologyControlHandler::OnAuthorityLeaseExpired() {
-    if (controller_ != nullptr) {
-        (void)controller_->ClearExternalDisplays();
+    VideoEncoderRuntimeState state;
+    VideoEncoderConfigResult result = VideoEncoderConfigResult::kInvalidConfig;
+    if (!control_->ApplyVideoEncoderConfig(update, &state, &result, error)) {
+        return control::SerializeControlErrorResponse(
+                request.header.request_id, request.header.command_id,
+                control::ControlError::kInternalError, response, error);
     }
+    return SerializeVideoEncoderConfigResponse(state, result, request.header.request_id, response,
+                                               error);
 }
 
-}  // namespace floral::device::display::topology
+void VideoEncoderControlHandler::OnAuthorityLeaseExpired() {
+    // Video configuration is intentionally not reverted by the topology
+    // authority lease; the host must send an explicit replacement update.
+}
+
+}  // namespace floral::device::service

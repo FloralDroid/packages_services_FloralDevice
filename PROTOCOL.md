@@ -1,4 +1,4 @@
-# Floral Device Host Protocols
+# Floral Device Host Protocols / Floral Device 宿主协议
 
 The video channel is a Unix `SOCK_STREAM`. Every H.264 access unit starts with
 a fixed 80-byte header followed by exactly `payload_size` bytes. Integer fields
@@ -52,7 +52,46 @@ to the caller instead of blocking the encoder thread. The session manager is
 responsible for dropping dependent frames, requesting an IDR, and marking the
 next recoverable packet as a discontinuity.
 
-## FHC1 HAL/device control channel
+## FSA1 encoded audio channel / FSA1 编码音频通道
+
+The audio channel is a separate Unix `SOCK_STREAM`. Every Opus packet starts
+with a fixed 64-byte header followed by exactly `payload_size` bytes. Integer
+fields use network byte order. One packet represents 240 stereo samples per
+channel at 48 kHz, or 5 milliseconds. C or C++ structure layout is not part of
+the protocol.
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Magic `FSA1` |
+| 4 | 2 | Protocol version, currently `1` |
+| 6 | 2 | Header size, currently `64` |
+| 8 | 4 | Stream id |
+| 12 | 4 | Stream generation |
+| 16 | 8 | Packet sequence within the generation |
+| 24 | 8 | First sample `CLOCK_MONOTONIC` presentation time in nanoseconds |
+| 32 | 4 | Sample rate, currently `48000` |
+| 36 | 2 | Channel count, currently `2` |
+| 38 | 2 | Codec id, `1` for Opus; `2` is reserved for diagnostic PCM S16_LE |
+| 40 | 4 | PCM frame count represented by this packet, currently `240` |
+| 44 | 4 | Encoded payload size, at most `1275` bytes |
+| 48 | 4 | Packet flags |
+| 52 | 4 | Reserved, must be zero |
+| 56 | 8 | First frame position since the HAL output opened |
+
+Flag bit 0 marks the first delivered packet of a generation. Bit 1 marks a
+discontinuity caused by stream start, FMQ or socket queue overflow, service
+reconnection, or an input gap. Bit 2 is reserved for an explicit stream-end
+packet. A bitrate-only update does not change the generation and requires no
+decoder reconfiguration. The receiver uses sequence gaps with Opus PLC or a
+short silence interval; it must not accumulate old packets to repair latency.
+
+音频使用独立 Unix `SOCK_STREAM`。每个 Opus 包由固定 64 字节大端协议头和紧随其后
+的 `payload_size` 字节负载组成。每包表示 48 kHz 双声道每声道 240 个采样，即
+5 毫秒。bit 0 表示 generation 首包，bit 1 表示输入、FMQ、宿主队列或重连造成的
+不连续，bit 2 保留给显式流结束。仅修改码率不会改变 generation，也不要求解码器
+重新配置；接收端应使用 Opus PLC 或短静音处理序列缺口，不能补发旧包并累积延迟。
+
+## FHC1 HAL/device control channel / HAL 设备控制面
 
 The control channel is a bidirectional Unix `SOCK_STREAM`. The host listens at
 `/mnt/vendor/floral_stream/control.sock` by default and the container connects
@@ -64,16 +103,24 @@ network byte order.
 | 0 | 4 | Magic `FHC1` |
 | 4 | 2 | Protocol version, currently `1` |
 | 6 | 2 | Header size, currently `24` |
-| 8 | 2 | Message type |
-| 10 | 2 | Flags, must be zero |
+| 8 | 2 | Command id |
+| 10 | 2 | Route/kind word |
 | 12 | 4 | Nonzero request id copied into the response |
 | 16 | 4 | Payload size, at most 65536 bytes |
 | 20 | 4 | Reserved, must be zero |
 
-Message type `0x0100` replaces the complete desired external-display
-topology. Its response is `0x8100`. Unknown requests receive a generic
-`0x8000` error response. Full snapshots make reconnection idempotent and avoid
-ordering dependencies between incremental add and remove commands.
+The route/kind word is independent from the command id. The high nibble selects
+the FHC1 control plane (`0x1000`), bits 11..8 select the packet kind (`0`
+request, `1` response, `2` event, `3` error response), and bits 7..0 are
+reserved for future route flags and must currently be zero. The route values
+are therefore `0x1000`, `0x1100`, `0x1200`, and `0x1300`. This keeps direction
+and routing visible in a binary dump without consuming command ids.
+
+Command id `0x0100` replaces the complete desired external-display topology.
+Its response uses the same command id and route kind `0x1100`. Unknown
+requests receive command id `0x0000` with route kind `0x1300`. Full snapshots
+make reconnection idempotent and avoid ordering dependencies between
+incremental add and remove commands.
 
 The replace-topology payload begins with:
 
@@ -99,7 +146,7 @@ Each display then uses a variable-size record:
 | next | variable | Display name without a trailing null |
 | next | 0-3 | Zero padding included in record size |
 
-The 16-byte `0x8100` response contains a 32-bit result, a zero reserved word,
+The 16-byte response payload contains a 32-bit result, a zero reserved word,
 and the resulting 64-bit topology generation. Result values are `0` applied,
 `1` unchanged, `2` invalid display, `3` duplicate display id, `4`
 duplicate port, and `5` controller unavailable.
@@ -114,6 +161,87 @@ this channel. FHC1 is reserved for HAL/device configuration, capability, and
 status operations; touch, keyboard, and other device actions do not use this
 channel.
 
+Command id `0x0200` updates one Opus audio stream. Its fixed 16-byte request is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Stream id |
+| 4 | 4 | Update-field mask; bit 0 selects bitrate |
+| 8 | 4 | Opus bitrate in bits per second |
+| 12 | 4 | Reserved, must be zero |
+
+The current implementation requires mask value `0x00000001` and accepts
+bitrates from 16000 through 512000 bit/s. The fixed 20-byte response contains
+result, supported-field mask, current generation, effective bitrate, and codec
+id at offsets 0, 4, 8, 12, and 16. Results are `0` applied, `1` invalid
+configuration, `2` unsupported, and `3` unknown stream. Applying bitrate uses
+`OPUS_SET_BITRATE`; it does not recreate the encoder or increment generation.
+
+命令 `0x0200` 动态调整一个 Opus 音频流。16 字节请求依次包含 stream id、字段
+掩码、码率和零保留字段；当前只允许掩码 bit 0，码率范围为 16000 至 512000 bit/s。
+20 字节响应依次返回结果、支持字段、当前 generation、实际码率和 codec id。实现
+通过 `OPUS_SET_BITRATE` 原位生效，不重建编码器，也不递增 generation。
+
+Command id `0x0300` updates one active video encoder. Its fixed 48-byte request
+payload is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 8 | Target display id |
+| 8 | 4 | Stream id |
+| 12 | 4 | Update-field mask |
+| 16 | 4 | Encoder backend: `0` MediaCodec software, `1` FFmpeg VA-API |
+| 20 | 4 | Codec id: `1` H.264 |
+| 24 | 4 | Coded width |
+| 28 | 4 | Coded height |
+| 32 | 4 | Frame rate in frames per second |
+| 36 | 4 | Bitrate in bits per second |
+| 40 | 4 | I-frame interval in seconds |
+| 44 | 4 | Reserved, must be zero |
+
+Mask bits `0` through `5` select bitrate, frame rate, coded resolution,
+I-frame interval, encoder backend, and codec respectively. At least one bit
+must be set. A field not selected by the mask must be zero, making partial
+updates unambiguous in packet captures. The coded resolution must preserve the
+logical display aspect ratio and current rotation; it changes encoder output
+size without changing the Android display or its input coordinate space.
+
+The fixed 32-byte response payload is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Result |
+| 4 | 4 | Supported update-field mask |
+| 8 | 4 | Current active generation |
+| 12 | 4 | Pending flag, `0` or `1` |
+| 16 | 4 | Effective bitrate |
+| 20 | 4 | Effective frame rate |
+| 24 | 4 | Desired coded width |
+| 28 | 4 | Desired coded height |
+
+Results are `0` applied, `1` pending session replacement, `2` invalid
+configuration, `3` unsupported value, and `4` unknown display or stream.
+Bitrate-only updates are applied to the running encoder and retain the current
+generation. Frame-rate, coded-resolution, I-frame-interval, backend, or codec
+changes replace the encoder session. The replacement increments generation,
+invalidates registered source buffers, and starts with new codec configuration
+and a key frame. Lower frame rates are also enforced at frame ingress so the
+encoder does not continue receiving every compositor frame.
+
+### 中文约束摘要
+
+FHC1 使用 24 字节固定大端帧头。`command_id` 只标识命令，`route_kind` 的高
+四位固定为 `0001`，接着四位区分请求、响应、事件和错误，最低八位当前必须
+为零。这样不会把请求/响应方向和命令编号混在一个字段里，也不需要为每个
+响应消耗另一组命令号。当前实现包括完整快照拓扑命令 `0x0100`、音频编码配置
+命令 `0x0200` 和视频编码配置命令 `0x0300`；主屏
+`displayId=0` 永久存在，控制 socket 断开后外屏默认保留三秒，租约到期只
+清空外屏。音频码率通过 `0x0200` 原位调整。视频配置通过字段掩码支持部分更新：
+只改码率时沿用当前 generation，
+帧率、编码分辨率、I 帧间隔、后端或编码格式变化时重建会话并递增 generation。
+编码分辨率不会改变 Android 逻辑显示尺寸和输入坐标。控制面不承载触摸、键盘
+或鼠标事件。
+
 ## FDO1 device-operation channel
 
 The operation channel is a separate bidirectional Unix `SOCK_STREAM` at
@@ -121,3 +249,9 @@ The operation channel is a separate bidirectional Unix `SOCK_STREAM` at
 such as touch, keyboard, mouse, gestures, and explicit display operations.
 The FDO1 header and operation payloads are not frozen in this repository yet.
 No FDO1 listener or connector is implemented by the current milestone.
+
+### 中文说明
+
+FDO1 是独立的设备操控面，未来承载触摸、键盘、鼠标、手势和显式显示操作。
+它与 FHC1 的 HAL 配置控制严格分离；当前里程碑只冻结名称和 socket 边界，
+尚未冻结 FDO1 帧头，也没有实现监听器或连接器。

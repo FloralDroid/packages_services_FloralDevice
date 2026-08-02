@@ -17,6 +17,7 @@
 #pragma once
 
 #include "floral/device/display/FrameConsumerService.h"
+#include "floral/device/service/VideoEncoderControl.h"
 #include "floral/stream/session/VideoStreamSession.h"
 #include "floral/stream/transport/HostVideoSink.h"
 
@@ -30,15 +31,16 @@ namespace floral::device::service {
 struct VideoFrameConsumerBackendConfig {
     uint64_t display_id = 1;
     std::string video_socket_path;
-    session::VideoStreamSessionConfig session_config;
-    transport::HostVideoSinkConfig sink_config;
+    floral::stream::session::VideoStreamSessionConfig session_config;
+    floral::stream::transport::HostVideoSinkConfig sink_config;
     std::chrono::milliseconds reconnect_interval{1'000};
     size_t max_output_packets_per_frame = 32;
 };
 
-// Creates a reconnecting single-display backend. The backend advertises an
-// active generation only while both the selected encoder and host socket are ready.
+// Creates a reconnecting single-display backend. The returned object also
+// implements VideoEncoderControl for FHC1 runtime configuration updates.
 std::shared_ptr<display::FrameConsumerBackend> CreateVideoFrameConsumerBackend(
-        VideoFrameConsumerBackendConfig config);
+        VideoFrameConsumerBackendConfig config,
+        std::shared_ptr<VideoEncoderControl>* encoder_control = nullptr);
 
 }  // namespace floral::device::service
