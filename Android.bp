@@ -221,6 +221,23 @@ cc_library_static {
 }
 
 cc_library_static {
+    name: "libfloral_device_operation_protocol",
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    cpp_std: "c++17",
+    vendor_available: true,
+    host_supported: true,
+    srcs: [
+        "input/TouchOperationProtocol.cpp",
+        "operation/OperationProtocol.cpp",
+    ],
+    export_include_dirs: ["include"],
+}
+
+cc_library_static {
     name: "libfloral_stream_session",
     defaults: ["floral_device_common_defaults"],
     vendor: true,
@@ -418,6 +435,24 @@ cc_test {
     test_suites: ["device-tests"],
 }
 
+cc_test_host {
+    name: "floral_device_operation_protocol_tests_host",
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    cpp_std: "c++17",
+    local_include_dirs: ["include"],
+    srcs: [
+        "tests/OperationProtocolTest.cpp",
+        "tests/TouchOperationProtocolTest.cpp",
+    ],
+    static_libs: [
+        "libfloral_device_operation_protocol",
+    ],
+}
+
 cc_test {
     name: "floral_stream_audio_tests",
     defaults: ["floral_device_common_defaults"],
@@ -475,6 +510,20 @@ cc_test {
         "libcutils",
         "liblog",
         "libnativewindow",
+    ],
+    test_suites: ["device-tests"],
+}
+
+cc_test {
+    name: "floral_device_operation_protocol_tests",
+    defaults: ["floral_device_common_defaults"],
+    vendor: true,
+    srcs: [
+        "tests/OperationProtocolTest.cpp",
+        "tests/TouchOperationProtocolTest.cpp",
+    ],
+    static_libs: [
+        "libfloral_device_operation_protocol",
     ],
     test_suites: ["device-tests"],
 }
