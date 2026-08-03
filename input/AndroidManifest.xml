@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.floraldroid.input">
+
+    <uses-permission android:name="android.permission.INJECT_EVENTS" />
+
+    <application
+        android:name=".FloralInputApplication"
+        android:allowBackup="false"
+        android:defaultToDeviceProtectedStorage="true"
+        android:directBootAware="true"
+        android:hasCode="true"
+        android:label="Floral Input"
+        android:persistent="true"
+        android:supportsRtl="false" />
+</manifest>

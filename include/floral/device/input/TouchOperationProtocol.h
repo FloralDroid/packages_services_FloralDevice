@@ -47,15 +47,22 @@ enum class TouchAction : uint8_t {
     kCancel = 3,
 };
 
+enum class TargetInvalidationReason : uint8_t {
+    kDisplayRemoved = 1,
+    kGeometryChanged = 2,
+};
+
 struct BindInputTargetRequest {
     uint8_t target_slot = 0;
     InputTargetMode mode = InputTargetMode::kExclusive;
+    uint8_t display_port = 0;
     uint32_t stream_id = 0;
 };
 
 struct BindInputTargetResponse {
     InputOperationResult result = InputOperationResult::kInvalidTarget;
     uint8_t target_slot = 0;
+    uint8_t display_port = 0;
     uint32_t stream_id = 0;
     uint32_t input_epoch = 0;
     uint32_t logical_width = 0;
@@ -70,6 +77,13 @@ struct UnbindInputTargetRequest {
 struct UnbindInputTargetResponse {
     InputOperationResult result = InputOperationResult::kInvalidTarget;
     uint8_t target_slot = 0;
+};
+
+struct TargetInvalidatedEvent {
+    uint8_t target_slot = 0;
+    TargetInvalidationReason reason = TargetInvalidationReason::kDisplayRemoved;
+    uint32_t stream_id = 0;
+    uint32_t input_epoch = 0;
 };
 
 // Coordinates, pressure, and touch_major use the full normalized uint16 range.
@@ -104,6 +118,11 @@ bool SerializeUnbindInputTargetResponse(const UnbindInputTargetResponse& source,
                                         std::vector<uint8_t>* payload, std::string* error);
 bool ParseUnbindInputTargetResponse(const std::vector<uint8_t>& payload,
                                     UnbindInputTargetResponse* parsed, std::string* error);
+
+bool SerializeTargetInvalidatedEvent(const TargetInvalidatedEvent& source,
+                                     std::vector<uint8_t>* payload, std::string* error);
+bool ParseTargetInvalidatedEvent(const std::vector<uint8_t>& payload,
+                                 TargetInvalidatedEvent* parsed, std::string* error);
 
 bool SerializeTouchEvent(const TouchEvent& source, std::vector<uint8_t>* payload,
                          std::string* error);

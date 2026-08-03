@@ -55,6 +55,7 @@ enum class OperationCode : uint16_t {
     kGenericError = 0x0000,
     kBindInputTarget = 0x0100,
     kUnbindInputTarget = 0x0101,
+    kTargetInvalidated = 0x0102,
     kTouch = 0x0200,
 };
 

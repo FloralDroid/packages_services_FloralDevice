@@ -25,6 +25,9 @@ or hardware encoding and sends encoded access units to a host Unix socket.
   thread.
 - `libfloral_hal_control` implements the bidirectional FHC1 control channel,
   bounded framing, reconnect handling, and authority-lease lifecycle.
+- `FloralInputService` owns the FDO1 operation connection, per-display input
+  leases, multi-pointer state, and direct Framework `MotionEvent` injection.
+  It does not create a kernel input device.
 - `libfloral_stream_session` uses one worker to orchestrate encoder output,
   host delivery, submission timestamps, and key-frame recovery.
 - `floral.device.display` is the versioned system/vendor AIDL contract for
@@ -44,6 +47,8 @@ transport, and x86_64 VA-API DRM PRIME/VPP integration.
 `floral_device_display_tests` covers cross-process HardwareBuffer ownership,
 descriptor validation, topology publication, FHC1 parsing, and control-lease
 behavior.
+`floral_input_protocol_tests_host` covers FDO1 framing, target leases, epochs,
+multi-pointer actions, coordinate conversion, and cancellation cleanup.
 
 ### Primary display configuration
 
@@ -89,9 +94,8 @@ ownership. The GLES rotation fallback also waits for its intermediate render
 before VPP because VA does not accept the Android native fence directly. Codec
 output dequeueing remains non-blocking.
 
-Audio and input are outside the current milestone. Display topology already
-supports multiple external displays, while encoded video currently consumes
-the permanent primary display only.
+FDO1 touch control supports the permanent primary and hotplug external displays.
+Encoded video currently consumes the permanent primary display only.
 
 ## 中文
 
@@ -112,6 +116,8 @@ Unix Socket。
   避免 Socket 背压阻塞编码器线程。
 - `libfloral_hal_control` 实现双向 FHC1 控制通道、有界帧解析、断线重连和
   控制权租约生命周期。
+- `FloralInputService` 负责 FDO1 操作连接、分屏输入租约、多指状态和直接的
+  Framework `MotionEvent` 注入，不创建内核输入设备。
 - `libfloral_stream_session` 使用单工作线程编排编码器输出、宿主投递、提交
   时间戳和关键帧恢复。
 - `floral.device.display` 是最终缓冲区注册及 acquire/release fence 交换使用的
@@ -127,6 +133,8 @@ Unix Socket。
 码率、输出完整性、竖屏旋转、缓冲区复用、传输和 x86_64 VA-API DRM
 PRIME/VPP 集成。`floral_device_display_tests` 覆盖跨进程 HardwareBuffer
 所有权、描述符校验、拓扑发布、FHC1 解析和控制权租约行为。
+`floral_input_protocol_tests_host` 覆盖 FDO1 帧解析、目标租约、epoch、多指动作、
+坐标转换和取消清理。
 
 ### 主屏配置
 
@@ -166,5 +174,4 @@ Socket 背压不会阻塞 SurfaceFlinger。软件提交仅同步到 EGL 已排�
 由于 VA 不能直接接收 Android 原生 fence，GLES 旋转回退也会等待中间渲染完成
 后再进入 VPP。编码器输出 dequeue 始终保持非阻塞。
 
-音频和输入不属于当前里程碑。显示拓扑已经支持多个外屏，但编码视频目前只消费
-永久主屏。
+FDO1 触摸控制支持永久主屏和动态外屏；编码视频目前仍只消费永久主屏。

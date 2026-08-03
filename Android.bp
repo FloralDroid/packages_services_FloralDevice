@@ -237,6 +237,33 @@ cc_library_static {
     export_include_dirs: ["include"],
 }
 
+android_app {
+    name: "FloralInputService",
+    srcs: [
+        "input/java/**/*.java",
+    ],
+    manifest: "input/AndroidManifest.xml",
+    certificate: "platform",
+    platform_apis: true,
+    privileged: true,
+    optimize: {
+        enabled: false,
+    },
+}
+
+java_test_host {
+    name: "floral_input_protocol_tests_host",
+    srcs: [
+        "input/java/com/floraldroid/input/InputStateMachine.java",
+        "input/java/com/floraldroid/input/OperationProtocol.java",
+        "tests/java/**/*.java",
+    ],
+    static_libs: ["junit"],
+    test_options: {
+        unit_test: true,
+    },
+}
+
 cc_library_static {
     name: "libfloral_stream_session",
     defaults: ["floral_device_common_defaults"],
@@ -398,6 +425,7 @@ cc_binary {
     ],
     init_rc: ["service/floral-device.rc"],
     vintf_fragments: ["service/floral-device.xml"],
+    required: ["FloralInputService"],
 }
 
 cc_test {

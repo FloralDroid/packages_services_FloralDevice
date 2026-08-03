@@ -23,6 +23,7 @@ constexpr size_t kBindRequestSize = 8;
 constexpr size_t kBindResponseSize = 28;
 constexpr size_t kUnbindRequestSize = 4;
 constexpr size_t kUnbindResponseSize = 8;
+constexpr size_t kTargetInvalidatedEventSize = 12;
 constexpr size_t kTouchEventSize = 24;
 
 bool SetError(std::string* error, const char* message) {
@@ -93,6 +94,11 @@ bool IsKnownAction(TouchAction action) {
     return false;
 }
 
+bool IsKnownInvalidationReason(TargetInvalidationReason reason) {
+    return reason == TargetInvalidationReason::kDisplayRemoved ||
+           reason == TargetInvalidationReason::kGeometryChanged;
+}
+
 bool IsValidBindResponse(const BindInputTargetResponse& source) {
     if (!IsKnownResult(source.result) || !IsKnownRotation(source.rotation)) {
         return false;
@@ -114,7 +120,8 @@ bool IsValidTouchEvent(const TouchEvent& source) {
         return source.pressure != 0;
     }
     if (source.action == TouchAction::kCancel) {
-        return source.x == 0 && source.y == 0 && source.pressure == 0 && source.touch_major == 0;
+        return source.pointer_id == 0 && source.x == 0 && source.y == 0 && source.pressure == 0 &&
+               source.touch_major == 0;
     }
     return true;
 }
@@ -132,6 +139,7 @@ bool SerializeBindInputTargetRequest(const BindInputTargetRequest& source,
     payload->assign(kBindRequestSize, 0);
     (*payload)[0] = source.target_slot;
     (*payload)[1] = static_cast<uint8_t>(source.mode);
+    (*payload)[2] = source.display_port;
     WriteUint32(payload->data() + 4, source.stream_id);
     return true;
 }
@@ -141,12 +149,13 @@ bool ParseBindInputTargetRequest(const std::vector<uint8_t>& payload,
     if (parsed == nullptr) {
         return SetError(error, "parsed bind input target output is null");
     }
-    if (payload.size() != kBindRequestSize || ReadUint16(payload.data() + 2) != 0) {
+    if (payload.size() != kBindRequestSize || payload[3] != 0) {
         return SetError(error, "bind input target request payload is invalid");
     }
     BindInputTargetRequest result;
     result.target_slot = payload[0];
     result.mode = static_cast<InputTargetMode>(payload[1]);
+    result.display_port = payload[2];
     result.stream_id = ReadUint32(payload.data() + 4);
     if (!IsKnownMode(result.mode) || result.stream_id == 0) {
         return SetError(error, "bind input target request is invalid");
@@ -166,6 +175,7 @@ bool SerializeBindInputTargetResponse(const BindInputTargetResponse& source,
     payload->assign(kBindResponseSize, 0);
     WriteUint32(payload->data(), static_cast<uint32_t>(source.result));
     (*payload)[4] = source.target_slot;
+    (*payload)[5] = source.display_port;
     WriteUint32(payload->data() + 8, source.stream_id);
     WriteUint32(payload->data() + 12, source.input_epoch);
     WriteUint32(payload->data() + 16, source.logical_width);
@@ -179,13 +189,14 @@ bool ParseBindInputTargetResponse(const std::vector<uint8_t>& payload,
     if (parsed == nullptr) {
         return SetError(error, "parsed bind input target response output is null");
     }
-    if (payload.size() != kBindResponseSize || payload[5] != 0 || payload[6] != 0 ||
-        payload[7] != 0 || ReadUint16(payload.data() + 26) != 0) {
+    if (payload.size() != kBindResponseSize || payload[6] != 0 || payload[7] != 0 ||
+        ReadUint16(payload.data() + 26) != 0) {
         return SetError(error, "bind input target response payload is invalid");
     }
     BindInputTargetResponse result;
     result.result = static_cast<InputOperationResult>(ReadUint32(payload.data()));
     result.target_slot = payload[4];
+    result.display_port = payload[5];
     result.stream_id = ReadUint32(payload.data() + 8);
     result.input_epoch = ReadUint32(payload.data() + 12);
     result.logical_width = ReadUint32(payload.data() + 16);
@@ -249,6 +260,44 @@ bool ParseUnbindInputTargetResponse(const std::vector<uint8_t>& payload,
     result.target_slot = payload[4];
     if (!IsKnownResult(result.result)) {
         return SetError(error, "unbind input target result is unknown");
+    }
+    *parsed = result;
+    return true;
+}
+
+bool SerializeTargetInvalidatedEvent(const TargetInvalidatedEvent& source,
+                                     std::vector<uint8_t>* payload, std::string* error) {
+    if (payload == nullptr) {
+        return SetError(error, "target invalidated event payload output is null");
+    }
+    if (!IsKnownInvalidationReason(source.reason) || source.stream_id == 0 ||
+        source.input_epoch == 0) {
+        return SetError(error, "target invalidated event is invalid");
+    }
+    payload->assign(kTargetInvalidatedEventSize, 0);
+    (*payload)[0] = source.target_slot;
+    (*payload)[1] = static_cast<uint8_t>(source.reason);
+    WriteUint32(payload->data() + 4, source.stream_id);
+    WriteUint32(payload->data() + 8, source.input_epoch);
+    return true;
+}
+
+bool ParseTargetInvalidatedEvent(const std::vector<uint8_t>& payload,
+                                 TargetInvalidatedEvent* parsed, std::string* error) {
+    if (parsed == nullptr) {
+        return SetError(error, "parsed target invalidated event output is null");
+    }
+    if (payload.size() != kTargetInvalidatedEventSize || ReadUint16(payload.data() + 2) != 0) {
+        return SetError(error, "target invalidated event payload is invalid");
+    }
+    TargetInvalidatedEvent result;
+    result.target_slot = payload[0];
+    result.reason = static_cast<TargetInvalidationReason>(payload[1]);
+    result.stream_id = ReadUint32(payload.data() + 4);
+    result.input_epoch = ReadUint32(payload.data() + 8);
+    if (!IsKnownInvalidationReason(result.reason) || result.stream_id == 0 ||
+        result.input_epoch == 0) {
+        return SetError(error, "target invalidated event is invalid");
     }
     *parsed = result;
     return true;

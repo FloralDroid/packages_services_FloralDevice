@@ -248,7 +248,8 @@ The operation channel is a separate bidirectional Unix `SOCK_STREAM` at
 `/mnt/vendor/floral_stream/operate.sock`. It is reserved for device actions
 such as touch, keyboard, mouse, gestures, and explicit display operations. The
 host listens and the container connects. This is separate from FHC1 so a slow
-configuration request cannot head-of-line block high-rate input.
+configuration request cannot head-of-line block high-rate input. The container
+path can be overridden with `ro.boot.floral_operate_socket`.
 
 Every message starts with a fixed 24-byte big-endian header:
 
@@ -283,7 +284,8 @@ The 8-byte `BIND_INPUT_TARGET` request is:
 | ---: | ---: | --- |
 | 0 | 1 | Target slot, range 0 through 255 |
 | 1 | 1 | Mode, currently `0` exclusive |
-| 2 | 2 | Reserved, must be zero |
+| 2 | 1 | Physical display port; `0` selects the permanent primary display |
+| 3 | 1 | Reserved, must be zero |
 | 4 | 4 | Nonzero stream id |
 
 The 28-byte response is:
@@ -292,7 +294,8 @@ The 28-byte response is:
 | ---: | ---: | --- |
 | 0 | 4 | Result |
 | 4 | 1 | Target slot |
-| 5 | 3 | Reserved, must be zero |
+| 5 | 1 | Physical display port |
+| 6 | 2 | Reserved, must be zero |
 | 8 | 4 | Stream id |
 | 12 | 4 | Input epoch |
 | 16 | 4 | Logical display width |
@@ -315,6 +318,17 @@ three-second display-topology lease.
 Slots are local to one FDO1 connection. Slot 1 on one connection does not name
 slot 1 on another connection. A service supporting multiple connections must
 also namespace pointer state by connection and apply exclusive target leases.
+The current FloralDroid implementation uses one reconnecting Android connection;
+the host gateway multiplexes its remote controllers into separate slots and
+performs user authorization before forwarding input. Within that connection,
+both physical displays and nonzero stream ids are leased exclusively.
+
+Operation `0x0102` is a `TARGET_INVALIDATED` event sent by Android when a bound
+display is removed or its geometry changes. Its 12-byte payload contains target
+slot and reason at offsets 0 and 1, a zero 16-bit reserved field, stream id at
+offset 4, and the invalidated input epoch at offset 8. Reasons are `1` display
+removed and `2` geometry changed. The host must stop the old event sequence and
+bind the slot again before sending more input.
 
 ### Touch event
 
@@ -336,11 +350,12 @@ Operation `0x0200` is an unacknowledged event (`route_kind=0x2200`,
 | 20 | 4 | Reserved, must be zero |
 
 DOWN and MOVE require nonzero pressure. CANCEL carries zero coordinates,
-pressure, and touch-major size. The Android side converts normalized coordinates
-to the logical dimensions fixed by the matching input epoch; coded video size
-is never used for input. Events with an unknown slot, stale epoch, repeated or
-decreasing sequence, or invalid pointer state are dropped and the target input
-state is cancelled when necessary.
+pressure, and touch-major size, uses pointer id zero, and cancels every active
+pointer in the target gesture. The Android side converts normalized coordinates
+to the logical dimensions fixed by the matching input epoch; coded video size is
+never used for input. Events with an unknown slot or stale epoch are dropped.
+Malformed events, repeated or decreasing sequences, and invalid pointer state
+cancel the affected target gesture so that Android cannot retain a stuck pointer.
 
 FDO1 only describes the userspace transport. FloralDroid input execution does
 not create a kernel uinput/evdev device; the operation service injects framework

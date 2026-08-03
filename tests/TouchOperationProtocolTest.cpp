@@ -27,6 +27,7 @@ namespace {
 TEST(TouchOperationProtocolTest, RoundTripsTargetBinding) {
     BindInputTargetRequest source;
     source.target_slot = 3;
+    source.display_port = 7;
     source.stream_id = 101;
     std::vector<uint8_t> payload;
     std::string error;
@@ -36,11 +37,13 @@ TEST(TouchOperationProtocolTest, RoundTripsTargetBinding) {
     ASSERT_TRUE(ParseBindInputTargetRequest(payload, &parsed, &error)) << error;
     EXPECT_EQ(parsed.target_slot, source.target_slot);
     EXPECT_EQ(parsed.mode, InputTargetMode::kExclusive);
+    EXPECT_EQ(parsed.display_port, source.display_port);
     EXPECT_EQ(parsed.stream_id, source.stream_id);
 
     BindInputTargetResponse response;
     response.result = InputOperationResult::kApplied;
     response.target_slot = source.target_slot;
+    response.display_port = source.display_port;
     response.stream_id = source.stream_id;
     response.input_epoch = 9;
     response.logical_width = 1920;
@@ -52,6 +55,7 @@ TEST(TouchOperationProtocolTest, RoundTripsTargetBinding) {
     ASSERT_TRUE(ParseBindInputTargetResponse(payload, &parsedResponse, &error)) << error;
     EXPECT_EQ(parsedResponse.result, response.result);
     EXPECT_EQ(parsedResponse.target_slot, response.target_slot);
+    EXPECT_EQ(parsedResponse.display_port, response.display_port);
     EXPECT_EQ(parsedResponse.stream_id, response.stream_id);
     EXPECT_EQ(parsedResponse.input_epoch, response.input_epoch);
     EXPECT_EQ(parsedResponse.logical_width, response.logical_width);
@@ -120,6 +124,24 @@ TEST(TouchOperationProtocolTest, CancelCarriesNoCoordinates) {
 
     source.x = 1;
     EXPECT_FALSE(SerializeTouchEvent(source, &payload, &error));
+}
+
+TEST(TouchOperationProtocolTest, RoundTripsTargetInvalidation) {
+    TargetInvalidatedEvent source;
+    source.target_slot = 4;
+    source.reason = TargetInvalidationReason::kGeometryChanged;
+    source.stream_id = 105;
+    source.input_epoch = 12;
+
+    std::vector<uint8_t> payload;
+    std::string error;
+    ASSERT_TRUE(SerializeTargetInvalidatedEvent(source, &payload, &error)) << error;
+    TargetInvalidatedEvent parsed;
+    ASSERT_TRUE(ParseTargetInvalidatedEvent(payload, &parsed, &error)) << error;
+    EXPECT_EQ(parsed.target_slot, source.target_slot);
+    EXPECT_EQ(parsed.reason, source.reason);
+    EXPECT_EQ(parsed.stream_id, source.stream_id);
+    EXPECT_EQ(parsed.input_epoch, source.input_epoch);
 }
 
 }  // namespace
