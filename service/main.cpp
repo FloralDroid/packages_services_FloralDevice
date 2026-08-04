@@ -112,7 +112,7 @@ floral::device::control::HostControlChannelConfig LoadControlConfig() {
 }  // namespace
 
 int main(int argc, char** argv) {
-    android::base::InitLogging(argv, android::base::KernelLogger);
+    android::base::InitLogging(argv, android::base::LogdLogger());
     (void)argc;
 
     std::string audioError;

@@ -21,6 +21,8 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
+#include <android-base/logging.h>
+
 #include <poll.h>
 #include <algorithm>
 #include <cerrno>
@@ -202,6 +204,43 @@ bool WaitForFenceFd(int fenceFd, std::string* error) {
     return SetError(error, std::string("polling acquire fence failed: ") + std::strerror(errno));
 }
 
+// EGL contexts are owned by the calling thread while current. Binder may move
+// consecutive buffer operations between threads, so every operation must
+// release the context before dropping the copier mutex.
+class ScopedEglContextBinding {
+  public:
+    ScopedEglContextBinding(EGLDisplay display, EGLSurface surface, EGLContext context,
+                            std::string* error)
+        : display_(display) {
+        if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+            SetEglError(error, "eglBindAPI");
+            return;
+        }
+        if (eglMakeCurrent(display, surface, surface, context) != EGL_TRUE) {
+            SetEglError(error, "eglMakeCurrent");
+            return;
+        }
+        current_ = true;
+    }
+
+    ~ScopedEglContextBinding() {
+        if (current_ &&
+            eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) != EGL_TRUE) {
+            LOG(ERROR) << "failed to release EGL context with error 0x" << std::hex
+                       << eglGetError();
+        }
+    }
+
+    ScopedEglContextBinding(const ScopedEglContextBinding&) = delete;
+    ScopedEglContextBinding& operator=(const ScopedEglContextBinding&) = delete;
+
+    bool ok() const { return current_; }
+
+  private:
+    EGLDisplay display_ = EGL_NO_DISPLAY;
+    bool current_ = false;
+};
+
 }  // namespace
 
 struct EglFrameCopier::Impl {
@@ -224,26 +263,27 @@ struct EglFrameCopier::Impl {
     ~Impl() {
         std::lock_guard lock(mutex);
         if (display != EGL_NO_DISPLAY && context != EGL_NO_CONTEXT && surface != EGL_NO_SURFACE) {
-            eglMakeCurrent(display, surface, surface, context);
-            glFinish();
-            for (auto& [id, buffer] : buffers) {
-                (void)id;
-                ReleaseImportedBuffer(&buffer);
+            ScopedEglContextBinding current(display, surface, context, nullptr);
+            if (current.ok()) {
+                glFinish();
+                for (auto& [id, buffer] : buffers) {
+                    (void)id;
+                    ReleaseImportedBuffer(&buffer);
+                }
+                buffers.clear();
+                if (output_framebuffer != 0) {
+                    glDeleteFramebuffers(1, &output_framebuffer);
+                }
+                if (output_renderbuffer != 0) {
+                    glDeleteRenderbuffers(1, &output_renderbuffer);
+                }
+                if (output_image != EGL_NO_IMAGE_KHR) {
+                    eglDestroyImageKHR(display, output_image);
+                }
+                if (program != 0) {
+                    glDeleteProgram(program);
+                }
             }
-            buffers.clear();
-            if (output_framebuffer != 0) {
-                glDeleteFramebuffers(1, &output_framebuffer);
-            }
-            if (output_renderbuffer != 0) {
-                glDeleteRenderbuffers(1, &output_renderbuffer);
-            }
-            if (output_image != EGL_NO_IMAGE_KHR) {
-                eglDestroyImageKHR(display, output_image);
-            }
-            if (program != 0) {
-                glDeleteProgram(program);
-            }
-            eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         }
         if (display != EGL_NO_DISPLAY && surface != EGL_NO_SURFACE) {
             eglDestroySurface(display, surface);
@@ -347,7 +387,8 @@ struct EglFrameCopier::Impl {
             return SetEglError(error, output_window != nullptr ? "eglCreateWindowSurface"
                                                                : "eglCreatePbufferSurface");
         }
-        if (!MakeCurrent(error)) {
+        ScopedEglContextBinding current(display, surface, context, error);
+        if (!current.ok()) {
             return false;
         }
 
@@ -409,13 +450,6 @@ struct EglFrameCopier::Impl {
             message << "AHardwareBuffer framebuffer is incomplete: 0x" << std::hex
                     << framebufferStatus;
             return SetError(error, message.str());
-        }
-        return true;
-    }
-
-    bool MakeCurrent(std::string* error) const {
-        if (eglMakeCurrent(display, surface, surface, context) != EGL_TRUE) {
-            return SetEglError(error, "eglMakeCurrent");
         }
         return true;
     }
@@ -565,7 +599,8 @@ bool EglFrameCopier::RegisterBuffer(AHardwareBuffer* buffer, uint64_t* outBuffer
     }
 
     std::lock_guard lock(impl_->mutex);
-    if (!impl_->MakeCurrent(error)) {
+    ScopedEglContextBinding current(impl_->display, impl_->surface, impl_->context, error);
+    if (!current.ok()) {
         return false;
     }
     if (impl_->buffers.find(bufferId) != impl_->buffers.end()) {
@@ -611,7 +646,11 @@ bool EglFrameCopier::RegisterBuffer(AHardwareBuffer* buffer, uint64_t* outBuffer
 void EglFrameCopier::UnregisterBuffer(uint64_t bufferId) {
     std::lock_guard lock(impl_->mutex);
     const auto iterator = impl_->buffers.find(bufferId);
-    if (iterator == impl_->buffers.end() || !impl_->MakeCurrent(nullptr)) {
+    if (iterator == impl_->buffers.end()) {
+        return;
+    }
+    ScopedEglContextBinding current(impl_->display, impl_->surface, impl_->context, nullptr);
+    if (!current.ok()) {
         return;
     }
     impl_->ReleaseImportedBuffer(&iterator->second);
@@ -632,7 +671,8 @@ FrameCopyResult EglFrameCopier::CopyFrame(uint64_t bufferId, android::base::uniq
         SetError(error, "frame references an unregistered hardware buffer");
         return result;
     }
-    if (!impl_->MakeCurrent(error) || !impl_->WaitAcquireFence(std::move(acquireFence), error)) {
+    ScopedEglContextBinding current(impl_->display, impl_->surface, impl_->context, error);
+    if (!current.ok() || !impl_->WaitAcquireFence(std::move(acquireFence), error)) {
         return result;
     }
 

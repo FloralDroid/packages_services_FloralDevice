@@ -34,6 +34,7 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <map>
 #include <string>
@@ -400,6 +401,81 @@ TEST(EncoderSessionTest, EncodesTransportedGuestBufferAndPreservesFenceOwnership
               << "floral_stream_async_release_fences=" << asynchronousReleaseFences << '\n'
               << "floral_stream_imported_frame_packets=" << collector.frame_packet_count()
               << std::endl;
+}
+
+TEST(EncoderSessionTest, MigratesEglContextAcrossLiveCallerThreads) {
+    EncoderConfig config;
+    config.width = 640;
+    config.height = 360;
+    config.bitrate_bps = 2'000'000;
+    config.frame_rate = 30;
+
+    std::string error;
+    const VideoGeometry geometry = MakeLandscapeCodedGeometry(config.height, config.width);
+    std::unique_ptr<EncoderSession> session = EncoderSession::Create(config, geometry, &error);
+    ASSERT_NE(session, nullptr) << error;
+
+    AHardwareBuffer_Desc description{};
+    description.width = geometry.logical_width;
+    description.height = geometry.logical_height;
+    description.layers = 1;
+    description.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+    description.usage =
+            AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+    AHardwareBuffer* rawBuffer = nullptr;
+    ASSERT_EQ(AHardwareBuffer_allocate(&description, &rawBuffer), 0);
+    HardwareBufferPtr buffer(rawBuffer, AHardwareBuffer_release);
+
+    uint64_t bufferId = 0;
+    bool registered = false;
+    std::string registrationError;
+    std::promise<void> registrationComplete;
+    std::future<void> registrationCompleteFuture = registrationComplete.get_future();
+    std::promise<void> releaseWorker;
+    std::future<void> releaseWorkerFuture = releaseWorker.get_future();
+
+    // Keep the registration thread alive while the creating thread submits a
+    // frame. A leaked current context then deterministically causes EGL_BAD_ACCESS.
+    std::thread registrationThread([&]() {
+        registered = session->RegisterBuffer(buffer.get(), &bufferId, &registrationError);
+        registrationComplete.set_value();
+        releaseWorkerFuture.wait();
+        if (registered) {
+            session->UnregisterBuffer(bufferId);
+        }
+    });
+    registrationCompleteFuture.wait();
+
+    bool filled = false;
+    bool reclaimed = false;
+    int reclaimStatus = 0;
+    FrameCopyResult submitted;
+    if (registered) {
+        android::base::unique_fd acquireFence;
+        filled = FillHardwareBuffer(buffer.get(), {}, 1, &acquireFence, &error);
+        if (filled) {
+            submitted = session->SubmitFrame(bufferId, std::move(acquireFence), 33'333'333, &error);
+        }
+        if (submitted.success) {
+            void* pixels = nullptr;
+            reclaimStatus =
+                    AHardwareBuffer_lock(buffer.get(), AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN,
+                                         submitted.release_fence.release(), nullptr, &pixels);
+            if (reclaimStatus == 0 && pixels != nullptr) {
+                reclaimStatus = AHardwareBuffer_unlock(buffer.get(), nullptr);
+                reclaimed = reclaimStatus == 0;
+            }
+        }
+    }
+
+    releaseWorker.set_value();
+    registrationThread.join();
+
+    ASSERT_TRUE(registered) << registrationError;
+    ASSERT_TRUE(filled) << error;
+    ASSERT_TRUE(submitted.success) << error;
+    ASSERT_TRUE(reclaimed) << "AHardwareBuffer reclaim failed with status " << reclaimStatus;
+    EXPECT_EQ(session->registered_buffer_count(), 0u);
 }
 
 #if defined(__x86_64__)
