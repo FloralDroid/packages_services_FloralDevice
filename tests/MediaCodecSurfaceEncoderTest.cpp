@@ -15,6 +15,7 @@
  */
 
 #include "EglSurfaceRenderer.h"
+#include "floral/device/display/HardwareBufferImporter.h"
 #include "floral/stream/codec/EncoderSession.h"
 #include "floral/stream/codec/MediaCodecSurfaceEncoder.h"
 #include "floral/stream/session/VideoStreamSession.h"
@@ -22,6 +23,10 @@
 
 #include <android-base/unique_fd.h>
 #include <android/hardware_buffer.h>
+#include <aidl/android/hardware/graphics/common/BufferUsage.h>
+#include <aidl/android/hardware/graphics/common/HardwareBuffer.h>
+#include <aidl/android/hardware/graphics/common/PixelFormat.h>
+#include <aidlcommonsupport/NativeHandle.h>
 #include <gtest/gtest.h>
 #include <sys/socket.h>
 
@@ -137,6 +142,26 @@ class OutputCollector {
 };
 
 using HardwareBufferPtr = std::unique_ptr<AHardwareBuffer, decltype(&AHardwareBuffer_release)>;
+
+aidl::android::hardware::graphics::common::HardwareBuffer ToTransportedBuffer(
+        AHardwareBuffer* buffer) {
+    using aidl::android::hardware::graphics::common::BufferUsage;
+    using aidl::android::hardware::graphics::common::HardwareBuffer;
+    using aidl::android::hardware::graphics::common::PixelFormat;
+
+    AHardwareBuffer_Desc description{};
+    AHardwareBuffer_describe(buffer, &description);
+
+    HardwareBuffer transported;
+    transported.description.width = static_cast<int32_t>(description.width);
+    transported.description.height = static_cast<int32_t>(description.height);
+    transported.description.layers = static_cast<int32_t>(description.layers);
+    transported.description.format = static_cast<PixelFormat>(description.format);
+    transported.description.usage = static_cast<BufferUsage>(description.usage);
+    transported.description.stride = static_cast<int32_t>(description.stride);
+    transported.handle = android::dupToAidl(AHardwareBuffer_getNativeHandle(buffer));
+    return transported;
+}
 
 bool FillHardwareBuffer(AHardwareBuffer* buffer, android::base::unique_fd releaseFence,
                         uint32_t frameIndex, android::base::unique_fd* outAcquireFence,
@@ -276,7 +301,7 @@ TEST(EncoderSessionTest, RejectsMismatchedCodedGeometryBeforeCodecCreation) {
     EXPECT_FALSE(error.empty());
 }
 
-TEST(EncoderSessionTest, RotatesPortraitBufferAndPreservesFenceOwnership) {
+TEST(EncoderSessionTest, EncodesTransportedGuestBufferAndPreservesFenceOwnership) {
     EncoderConfig config;
     config.width = 640;
     config.height = 360;
@@ -297,7 +322,16 @@ TEST(EncoderSessionTest, RotatesPortraitBufferAndPreservesFenceOwnership) {
             AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
     AHardwareBuffer* rawBuffer = nullptr;
     ASSERT_EQ(AHardwareBuffer_allocate(&description, &rawBuffer), 0);
-    HardwareBufferPtr buffer(rawBuffer, AHardwareBuffer_release);
+    HardwareBufferPtr sourceBuffer(rawBuffer, AHardwareBuffer_release);
+
+    floral::device::display::UniqueHardwareBuffer buffer;
+    {
+        aidl::android::hardware::graphics::common::HardwareBuffer transported =
+                ToTransportedBuffer(sourceBuffer.get());
+        buffer = floral::device::display::ImportHardwareBuffer(transported, &error);
+        ASSERT_NE(buffer, nullptr) << error;
+    }
+    sourceBuffer.reset();
 
     uint64_t bufferId = 0;
     ASSERT_TRUE(session->RegisterBuffer(buffer.get(), &bufferId, &error)) << error;
