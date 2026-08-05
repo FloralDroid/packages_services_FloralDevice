@@ -27,14 +27,14 @@ namespace floral::device::control {
 
 class ControlRequestHandler;
 
-using ControlSocketConnector =
+using ControlSocketAcceptor =
         std::function<android::base::unique_fd(const std::string& socket_path, std::string* error)>;
 
 struct HostControlChannelConfig {
     std::string socket_path;
     std::chrono::milliseconds reconnect_interval{250};
     std::chrono::milliseconds authority_lease{3000};
-    ControlSocketConnector connector;
+    ControlSocketAcceptor acceptor;
 };
 
 class HostControlChannel final {

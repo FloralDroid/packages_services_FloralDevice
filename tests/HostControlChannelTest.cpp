@@ -163,7 +163,7 @@ std::unique_ptr<HostControlChannel> CreateChannel(
     config.socket_path = "injected-control-socket";
     config.reconnect_interval = std::chrono::milliseconds(2);
     config.authority_lease = lease;
-    config.connector = [connectorQueue](const std::string&, std::string* error) {
+    config.acceptor = [connectorQueue](const std::string&, std::string* error) {
         ++connectorQueue->calls;
         std::lock_guard lock(connectorQueue->mutex);
         if (connectorQueue->sockets.empty()) {

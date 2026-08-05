@@ -19,12 +19,12 @@ package com.floraldroid.input;
 import android.app.Application;
 
 public final class FloralInputApplication extends Application {
-  private OperationClient operationClient;
+  private OperationServer operationServer;
 
   @Override
   public void onCreate() {
     super.onCreate();
-    operationClient = new OperationClient(this);
-    operationClient.start();
+    operationServer = new OperationServer(this);
+    operationServer.start();
   }
 }

@@ -103,6 +103,19 @@ cc_defaults {
 }
 
 cc_library_static {
+    name: "libfloral_unix_socket_server",
+    defaults: ["floral_device_common_defaults"],
+    vendor_available: true,
+    srcs: [
+        "socket/UnixSocketServer.cpp",
+    ],
+    shared_libs: [
+        "libbase",
+    ],
+    export_include_dirs: ["include"],
+}
+
+cc_library_static {
     name: "libfloral_stream_codec",
     defaults: ["floral_device_common_defaults"],
     vendor: true,
@@ -151,6 +164,9 @@ cc_library_static {
         "transport/HostAudioSink.cpp",
         "transport/HostVideoSink.cpp",
         "transport/VideoPacketProtocol.cpp",
+    ],
+    static_libs: [
+        "libfloral_unix_socket_server",
     ],
     shared_libs: [
         "libbase",
@@ -212,6 +228,9 @@ cc_library_static {
     srcs: [
         "control/ControlProtocol.cpp",
         "control/HostControlChannel.cpp",
+    ],
+    static_libs: [
+        "libfloral_unix_socket_server",
     ],
     shared_libs: [
         "libbase",
@@ -357,6 +376,7 @@ cc_library_static {
         "service/VideoFrameConsumerBackend.cpp",
     ],
     static_libs: [
+        "libfloral_unix_socket_server",
         "libfloral_hal_control",
         "libfloral_stream_audio",
         "libfloral_stream_session",
@@ -522,12 +542,14 @@ cc_test {
         "tests/ControlProtocolTest.cpp",
         "tests/DisplayTopologyControlProtocolTest.cpp",
         "tests/HostControlChannelTest.cpp",
+        "tests/UnixSocketServerTest.cpp",
         "tests/DisplayTopologyStateServiceTest.cpp",
         "tests/FrameConsumerServiceTest.cpp",
         "tests/HardwareBufferImporterTest.cpp",
     ],
     static_libs: [
         "libfloral_hal_control_center",
+        "libfloral_unix_socket_server",
         "libaidlcommonsupport",
         "libfloral_hal_control",
         "libfloral_device_display_ingress",

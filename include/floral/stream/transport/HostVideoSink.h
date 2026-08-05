@@ -67,9 +67,6 @@ struct HostVideoSinkDiscardResult {
 // caller owns recovery policy after a queue-full or disconnected result.
 class HostVideoSink {
   public:
-    static std::unique_ptr<HostVideoSink> Connect(const std::string& socketPath,
-                                                  const HostVideoSinkConfig& config,
-                                                  std::string* error);
     static std::unique_ptr<HostVideoSink> CreateFromConnectedSocket(
             android::base::unique_fd socket, const HostVideoSinkConfig& config, std::string* error);
 

@@ -1,8 +1,10 @@
 # Floral Device Host Protocols / Floral Device 宿主协议
 
-The video channel is a Unix `SOCK_STREAM`. Every H.264 access unit starts with
-a fixed 80-byte header followed by exactly `payload_size` bytes. Integer fields
-use network byte order. C or C++ structure layout is not part of the protocol.
+The video channel is a Unix `SOCK_STREAM`. The container listens at
+`/mnt/vendor/floral_stream/video.sock` by default and the host connects to it.
+Every H.264 access unit starts with a fixed 80-byte header followed by exactly
+`payload_size` bytes. Integer fields use network byte order. C or C++ structure
+layout is not part of the protocol.
 
 | Offset | Size | Field |
 | ---: | ---: | --- |
@@ -54,11 +56,12 @@ next recoverable packet as a discontinuity.
 
 ## FSA1 encoded audio channel / FSA1 编码音频通道
 
-The audio channel is a separate Unix `SOCK_STREAM`. Every Opus packet starts
-with a fixed 64-byte header followed by exactly `payload_size` bytes. Integer
-fields use network byte order. One packet represents 240 stereo samples per
-channel at 48 kHz, or 5 milliseconds. C or C++ structure layout is not part of
-the protocol.
+The audio channel is a separate Unix `SOCK_STREAM`. The container listens at
+`/mnt/vendor/floral_stream/audio.sock` by default and the host connects to it.
+Every Opus packet starts with a fixed 64-byte header followed by exactly
+`payload_size` bytes. Integer fields use network byte order. One packet
+represents 240 stereo samples per channel at 48 kHz, or 5 milliseconds. C or
+C++ structure layout is not part of the protocol.
 
 | Offset | Size | Field |
 | ---: | ---: | --- |
@@ -93,9 +96,9 @@ short silence interval; it must not accumulate old packets to repair latency.
 
 ## FHC1 HAL/device control channel / HAL 设备控制面
 
-The control channel is a bidirectional Unix `SOCK_STREAM`. The host listens at
-`/mnt/vendor/floral_stream/control.sock` by default and the container connects
-to it. Every FHC1 message starts with a fixed 24-byte header. Integer fields use
+The control channel is a bidirectional Unix `SOCK_STREAM`. The container listens
+at `/mnt/vendor/floral_stream/control.sock` by default and the host connects to
+it. Every FHC1 message starts with a fixed 24-byte header. Integer fields use
 network byte order.
 
 | Offset | Size | Field |
@@ -247,7 +250,7 @@ FHC1 使用 24 字节固定大端帧头。`command_id` 只标识命令，`route_
 The operation channel is a separate bidirectional Unix `SOCK_STREAM` at
 `/mnt/vendor/floral_stream/operate.sock`. It is reserved for device actions
 such as touch, keyboard, mouse, gestures, and explicit display operations. The
-host listens and the container connects. This is separate from FHC1 so a slow
+container listens and the host connects. This is separate from FHC1 so a slow
 configuration request cannot head-of-line block high-rate input. The container
 path can be overridden with `ro.boot.floral_operate_socket`.
 

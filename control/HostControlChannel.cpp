@@ -20,11 +20,11 @@
 
 #include "floral/device/control/ControlProtocol.h"
 #include "floral/device/control/ControlRequestHandler.h"
+#include "floral/device/socket/UnixSocketServer.h"
 
 #include <log/log.h>
 #include <poll.h>
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -42,40 +42,9 @@
 #include <vector>
 
 namespace floral::device::control {
-namespace {
+namespace socket_transport = ::floral::device::socket;
 
 using Clock = std::chrono::steady_clock;
-
-android::base::unique_fd ConnectUnixSocket(const std::string& socketPath, std::string* error) {
-    sockaddr_un address{};
-    if (socketPath.empty() || socketPath.size() >= sizeof(address.sun_path)) {
-        if (error != nullptr) {
-            *error = "control socket path is empty or too long";
-        }
-        return {};
-    }
-
-    android::base::unique_fd socketFd(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
-    if (socketFd.get() < 0) {
-        if (error != nullptr) {
-            *error = std::string("socket(AF_UNIX) failed: ") + std::strerror(errno);
-        }
-        return {};
-    }
-
-    address.sun_family = AF_UNIX;
-    std::memcpy(address.sun_path, socketPath.c_str(), socketPath.size() + 1);
-    if (connect(socketFd.get(), reinterpret_cast<const sockaddr*>(&address), sizeof(address)) !=
-        0) {
-        if (error != nullptr) {
-            *error = std::string("connect control socket failed: ") + std::strerror(errno);
-        }
-        return {};
-    }
-    return socketFd;
-}
-
-}  // namespace
 
 class HostControlChannel::Impl final {
   public:
@@ -262,16 +231,13 @@ class HostControlChannel::Impl final {
     }
 
     void Run() {
-        bool waitingLogged = false;
         while (!stopping_.load()) {
             ExpireLeaseIfNeeded();
             std::string error;
-            android::base::unique_fd socketFd = config_.connector(config_.socket_path, &error);
+            android::base::unique_fd socketFd = config_.acceptor(config_.socket_path, &error);
             if (socketFd.get() < 0) {
-                if (!waitingLogged) {
-                    ALOGI("Waiting for host control socket %s: %s", config_.socket_path.c_str(),
-                          error.c_str());
-                    waitingLogged = true;
+                if (!error.empty()) {
+                    ALOGW("Accepting host control connection failed: %s", error.c_str());
                 }
                 const std::chrono::milliseconds wait = NextReconnectWait();
                 if (wait <= std::chrono::milliseconds::zero()) {
@@ -284,9 +250,8 @@ class HostControlChannel::Impl final {
                 continue;
             }
 
-            waitingLogged = false;
             SetActiveSocket(socketFd.get());
-            ALOGI("Connected host control socket: %s", config_.socket_path.c_str());
+            ALOGI("Accepted host control connection: %s", config_.socket_path.c_str());
             error.clear();
             (void)ProcessConnection(socketFd.get(), &error);
             ClearActiveSocket(socketFd.get());
@@ -344,8 +309,17 @@ std::unique_ptr<HostControlChannel> HostControlChannel::Create(
         }
         return nullptr;
     }
-    if (!config.connector) {
-        config.connector = ConnectUnixSocket;
+    if (!config.acceptor) {
+        std::unique_ptr<socket_transport::UnixSocketServer> listener =
+                socket_transport::UnixSocketServer::Create(config.socket_path, 1, error);
+        if (listener == nullptr) {
+            return nullptr;
+        }
+        std::shared_ptr<socket_transport::UnixSocketServer> sharedListener(std::move(listener));
+        config.acceptor = [sharedListener](const std::string&, std::string* acceptError) {
+            return sharedListener->Accept(std::chrono::milliseconds::zero(), acceptError);
+        };
+        ALOGI("Listening for host control connections: %s", config.socket_path.c_str());
     }
     return std::unique_ptr<HostControlChannel>(
             new HostControlChannel(std::make_unique<Impl>(std::move(config), std::move(handler))));

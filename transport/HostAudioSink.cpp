@@ -17,17 +17,16 @@
 #define LOG_TAG "floral-host-audio"
 
 #include "floral/stream/audio/HostAudioSink.h"
+#include "floral/device/socket/UnixSocketServer.h"
 
 #include <errno.h>
-#include <poll.h>
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 #include <chrono>
 #include <condition_variable>
-#include <cstring>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -38,7 +37,6 @@ namespace floral::stream::audio {
 namespace {
 
 constexpr auto kReconnectDelay = std::chrono::milliseconds(250);
-constexpr int kConnectTimeoutMilliseconds = 50;
 
 bool SetError(std::string* error, const char* message) {
     if (error != nullptr) {
@@ -64,48 +62,14 @@ bool SendAll(int socket_fd, const void* bytes, size_t size) {
     return true;
 }
 
-int ConnectSocket(const std::string& socket_path) {
-    sockaddr_un address{};
-    if (socket_path.empty() || socket_path.size() >= sizeof(address.sun_path)) {
-        return -1;
-    }
-
-    const int socketFd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
-    if (socketFd < 0) {
-        return -1;
-    }
-    address.sun_family = AF_UNIX;
-    std::memcpy(address.sun_path, socket_path.c_str(), socket_path.size() + 1);
-    if (connect(socketFd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0) {
-        return socketFd;
-    }
-    if (errno != EINPROGRESS) {
-        close(socketFd);
-        return -1;
-    }
-
-    pollfd descriptor{};
-    descriptor.fd = socketFd;
-    descriptor.events = POLLOUT;
-    if (poll(&descriptor, 1, kConnectTimeoutMilliseconds) <= 0) {
-        close(socketFd);
-        return -1;
-    }
-    int socketError = 0;
-    socklen_t socketErrorSize = sizeof(socketError);
-    if (getsockopt(socketFd, SOL_SOCKET, SO_ERROR, &socketError, &socketErrorSize) != 0 ||
-        socketError != 0) {
-        close(socketFd);
-        return -1;
-    }
-    return socketFd;
-}
-
 }  // namespace
 
 struct HostAudioSink::Impl {
-    explicit Impl(HostAudioSinkConfig sink_config)
-        : config(std::move(sink_config)), sender(&Impl::SenderLoop, this) {}
+    Impl(HostAudioSinkConfig sink_config,
+         std::unique_ptr<floral::device::socket::UnixSocketServer> socket_server)
+        : config(std::move(sink_config)),
+          server(std::move(socket_server)),
+          sender(&Impl::SenderLoop, this) {}
 
     ~Impl() {
         {
@@ -193,18 +157,22 @@ struct HostAudioSink::Impl {
                     MarkDiscontinuity();
                     continue;
                 }
-                socketFd = ConnectSocket(config.socket_path);
+                std::string acceptError;
+                android::base::unique_fd accepted =
+                        server->Accept(std::chrono::milliseconds::zero(), &acceptError);
+                socketFd = accepted.release();
                 if (socketFd < 0) {
-                    {
+                    if (!acceptError.empty()) {
                         std::lock_guard lock(mutex);
                         ++stats.connection_failures;
+                        ALOGW("accepting host audio connection failed: %s", acceptError.c_str());
                     }
                     nextConnectAttempt = now + kReconnectDelay;
                     MarkDiscontinuity();
                     continue;
                 }
                 discontinuity = true;
-                ALOGI("connected to host audio socket %s", config.socket_path.c_str());
+                ALOGI("accepted host audio connection: %s", config.socket_path.c_str());
             }
 
             const bool streamStart = packet.header.generation != deliveredGeneration;
@@ -249,6 +217,7 @@ struct HostAudioSink::Impl {
     }
 
     const HostAudioSinkConfig config;
+    const std::unique_ptr<floral::device::socket::UnixSocketServer> server;
     mutable std::mutex mutex;
     std::condition_variable condition;
     std::deque<HostAudioPacket> queue;
@@ -261,14 +230,18 @@ struct HostAudioSink::Impl {
 
 std::unique_ptr<HostAudioSink> HostAudioSink::Create(HostAudioSinkConfig config,
                                                      std::string* error) {
-    sockaddr_un address{};
-    if (config.socket_path.empty() || config.socket_path.size() >= sizeof(address.sun_path) ||
-        config.max_buffered_packets == 0) {
+    if (config.socket_path.empty() || config.max_buffered_packets == 0) {
         SetError(error, "host audio sink configuration is invalid");
         return nullptr;
     }
+    std::unique_ptr<floral::device::socket::UnixSocketServer> server =
+            floral::device::socket::UnixSocketServer::Create(config.socket_path, 1, error);
+    if (server == nullptr) {
+        return nullptr;
+    }
+    ALOGI("listening for host audio connections: %s", config.socket_path.c_str());
     return std::unique_ptr<HostAudioSink>(
-            new HostAudioSink(std::make_unique<Impl>(std::move(config))));
+            new HostAudioSink(std::make_unique<Impl>(std::move(config), std::move(server))));
 }
 
 HostAudioSink::HostAudioSink(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}

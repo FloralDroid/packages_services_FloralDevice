@@ -17,6 +17,7 @@
 #define LOG_TAG "floral-device"
 
 #include "floral/device/service/VideoFrameConsumerBackend.h"
+#include "floral/device/socket/UnixSocketServer.h"
 
 #include <android-base/logging.h>
 
@@ -87,9 +88,12 @@ bool IsResolutionWithinBounds(uint32_t width, uint32_t height) {
 class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
                                         public VideoEncoderControl {
   public:
-    explicit VideoFrameConsumerBackend(VideoFrameConsumerBackendConfig config)
+    VideoFrameConsumerBackend(
+            VideoFrameConsumerBackendConfig config,
+            std::unique_ptr<floral::device::socket::UnixSocketServer> socketServer)
         : config_(std::move(config)),
           desired_session_config_(config_.session_config),
+          socket_server_(std::move(socketServer)),
           next_reconnect_(std::chrono::steady_clock::now()) {}
 
     display::DisplayConsumerStreamState GetStreamState(uint64_t displayId) override {
@@ -335,8 +339,15 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
 
         next_reconnect_ = std::chrono::steady_clock::now() + config_.reconnect_interval;
         std::string error;
-        std::unique_ptr<transport::HostVideoSink> sink = transport::HostVideoSink::Connect(
-                config_.video_socket_path, config_.sink_config, &error);
+        android::base::unique_fd socket =
+                socket_server_->Accept(std::chrono::milliseconds::zero(), &error);
+        if (!socket.ok()) {
+            LogConnectionFailureLocked(error);
+            return;
+        }
+        std::unique_ptr<transport::HostVideoSink> sink =
+                transport::HostVideoSink::CreateFromConnectedSocket(std::move(socket),
+                                                                    config_.sink_config, &error);
         if (sink == nullptr) {
             LogConnectionFailureLocked(error);
             return;
@@ -431,14 +442,16 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
             return;
         }
         last_connection_error_ = error;
-        LOG(INFO) << "video stream is waiting for host socket " << config_.video_socket_path << ": "
-                  << error;
+        LOG(INFO) << "video stream is waiting for a host connection on "
+                  << config_.video_socket_path
+                  << (error.empty() ? std::string() : std::string(": ") + error);
     }
 
     // Socket/display identity is immutable; the desired encoder configuration
     // is replaced atomically under mutex_ before a new generation is created.
     const VideoFrameConsumerBackendConfig config_;
     session::VideoStreamSessionConfig desired_session_config_;
+    const std::unique_ptr<floral::device::socket::UnixSocketServer> socket_server_;
     std::mutex mutex_;
     std::unique_ptr<session::VideoStreamSession> session_;
     std::unordered_map<uint64_t, uint64_t> buffers_;
@@ -464,8 +477,16 @@ std::shared_ptr<display::FrameConsumerBackend> CreateVideoFrameConsumerBackend(
         LOG(ERROR) << "video frame consumer backend configuration is invalid";
         return nullptr;
     }
+    std::string error;
+    std::unique_ptr<floral::device::socket::UnixSocketServer> socketServer =
+            floral::device::socket::UnixSocketServer::Create(config.video_socket_path, 1, &error);
+    if (socketServer == nullptr) {
+        LOG(ERROR) << "failed to listen on the host video socket: " << error;
+        return nullptr;
+    }
+    LOG(INFO) << "listening for host video connections: " << config.video_socket_path;
     std::shared_ptr<VideoFrameConsumerBackend> backend =
-            std::make_shared<VideoFrameConsumerBackend>(std::move(config));
+            std::make_shared<VideoFrameConsumerBackend>(std::move(config), std::move(socketServer));
     if (encoderControl != nullptr) {
         *encoderControl = backend;
     }

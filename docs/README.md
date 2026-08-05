@@ -78,8 +78,10 @@ VA device.
 
 ### Control and lifecycle
 
-The service connects to `/mnt/vendor/floral_stream/control.sock` by default.
-`ro.boot.floral_control_socket` changes the endpoint. A valid full topology
+The container listens on the four filesystem endpoints `video.sock`,
+`audio.sock`, `control.sock`, and `operate.sock`; the host gateway connects to
+each endpoint. The corresponding `ro.boot.floral_*_socket` properties change
+their paths. A valid full topology
 snapshot owns the external displays until another full snapshot replaces it.
 
 After a disconnect, the service retains external displays for three seconds so
@@ -161,8 +163,9 @@ MediaCodec 可以原地更新码率。VA-API 在码率变化时先排空待处�
 
 ### 控制与生命周期
 
-服务默认连接 `/mnt/vendor/floral_stream/control.sock`；可通过
-`ro.boot.floral_control_socket` 修改端点。一个有效的完整拓扑快照将持有外屏
+容器默认监听 `video.sock`、`audio.sock`、`control.sock` 和 `operate.sock`
+四个文件系统端点，宿主网关分别连接这些端点；对应的
+`ro.boot.floral_*_socket` 属性可修改路径。一个有效的完整拓扑快照将持有外屏
 控制权，直到另一份完整快照替换它。
 
 连接断开后，服务保留外屏三秒，使宿主进程能够在不触发热插拔抖动的情况下重连。

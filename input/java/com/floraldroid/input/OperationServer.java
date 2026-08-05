@@ -17,10 +17,15 @@
 package com.floraldroid.input;
 
 import android.content.Context;
+import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 import android.os.SystemClock;
 import android.os.SystemProperties;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructStat;
 import android.util.Log;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -29,7 +34,7 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 
-final class OperationClient
+final class OperationServer
     implements Runnable, InputStateMachine.InvalidationListener, DisplayTargetResolver.Listener {
   private static final String TAG = "FloralInput";
   private static final String DEFAULT_SOCKET_PATH = "/mnt/vendor/floral_stream/operate.sock";
@@ -43,7 +48,7 @@ final class OperationClient
   private DataOutputStream activeOutput;
   private LocalSocket activeSocket;
 
-  OperationClient(Context context) {
+  OperationServer(Context context) {
     socketPath = SystemProperties.get("ro.boot.floral_operate_socket", DEFAULT_SOCKET_PATH);
     resolver = new DisplayTargetResolver(context, this);
     stateMachine =
@@ -60,22 +65,26 @@ final class OperationClient
   public void run() {
     boolean waitingLogged = false;
     while (true) {
-      try (LocalSocket socket = new LocalSocket(LocalSocket.SOCKET_STREAM)) {
-        socket.connect(new LocalSocketAddress(socketPath, LocalSocketAddress.Namespace.FILESYSTEM));
+      try (FilesystemSocketServer server = FilesystemSocketServer.create(socketPath)) {
         waitingLogged = false;
-        Log.i(TAG, "Connected operation socket: " + socketPath);
-        processConnection(socket);
+        Log.i(TAG, "Listening for host operation connections: " + socketPath);
+        while (true) {
+          try (LocalSocket socket = server.accept()) {
+            Log.i(TAG, "Accepted host operation connection: " + socketPath);
+            processConnection(socket);
+          } finally {
+            synchronized (outputLock) {
+              activeOutput = null;
+              activeSocket = null;
+            }
+            stateMachine.resetAll();
+          }
+        }
       } catch (IOException error) {
         if (!waitingLogged) {
-          Log.i(TAG, "Waiting for operation socket " + socketPath + ": " + error.getMessage());
+          Log.e(TAG, "Operation socket server failed for " + socketPath, error);
           waitingLogged = true;
         }
-      } finally {
-        synchronized (outputLock) {
-          activeOutput = null;
-          activeSocket = null;
-        }
-        stateMachine.resetAll();
       }
       SystemClock.sleep(RECONNECT_DELAY_MILLIS);
     }
@@ -221,6 +230,147 @@ final class OperationClient
           } catch (IOException ignored) {
           }
         }
+      }
+    }
+  }
+
+  private static final class FilesystemSocketServer implements AutoCloseable {
+    private static final int SOCKET_MODE = 0660;
+
+    private final String path;
+    private final LocalSocket boundSocket;
+    private final LocalServerSocket serverSocket;
+    private final long pathDevice;
+    private final long pathInode;
+
+    static FilesystemSocketServer create(String path) throws IOException {
+      removeSocketNode(path);
+      final LocalSocket boundSocket = new LocalSocket(LocalSocket.SOCKET_STREAM);
+      try {
+        boundSocket.bind(new LocalSocketAddress(path, LocalSocketAddress.Namespace.FILESYSTEM));
+        Os.chmod(path, SOCKET_MODE);
+        final StructStat status = Os.lstat(path);
+        return new FilesystemSocketServer(
+            path,
+            boundSocket,
+            new LocalServerSocket(boundSocket.getFileDescriptor()),
+            status.st_dev,
+            status.st_ino);
+      } catch (ErrnoException error) {
+        closeAfterCreateFailure(path, boundSocket);
+        throw error.rethrowAsIOException();
+      } catch (IOException error) {
+        closeAfterCreateFailure(path, boundSocket);
+        throw error;
+      }
+    }
+
+    private FilesystemSocketServer(
+        String path,
+        LocalSocket boundSocket,
+        LocalServerSocket serverSocket,
+        long pathDevice,
+        long pathInode) {
+      this.path = path;
+      this.boundSocket = boundSocket;
+      this.serverSocket = serverSocket;
+      this.pathDevice = pathDevice;
+      this.pathInode = pathInode;
+    }
+
+    LocalSocket accept() throws IOException {
+      return serverSocket.accept();
+    }
+
+    @Override
+    public void close() throws IOException {
+      IOException closeError = null;
+      try {
+        serverSocket.close();
+      } catch (IOException error) {
+        closeError = error;
+      }
+      try {
+        boundSocket.close();
+      } catch (IOException error) {
+        if (closeError == null) {
+          closeError = error;
+        }
+      }
+      try {
+        removeOwnedSocketNode(path, pathDevice, pathInode);
+      } catch (IOException error) {
+        if (closeError == null) {
+          closeError = error;
+        }
+      }
+      if (closeError != null) {
+        throw closeError;
+      }
+    }
+
+    private static void closeAfterCreateFailure(String path, LocalSocket socket) {
+      try {
+        socket.close();
+      } catch (IOException ignored) {
+      }
+      try {
+        removeSocketNode(path);
+      } catch (IOException ignored) {
+      }
+    }
+
+    private static void removeSocketNode(String path) throws IOException {
+      final StructStat status;
+      try {
+        status = Os.lstat(path);
+      } catch (ErrnoException error) {
+        if (error.errno == OsConstants.ENOENT) {
+          return;
+        }
+        throw error.rethrowAsIOException();
+      }
+      if (!OsConstants.S_ISSOCK(status.st_mode)) {
+        throw new IOException("socket path already exists and is not a Unix socket");
+      }
+      boolean active = false;
+      try (LocalSocket probe = new LocalSocket(LocalSocket.SOCKET_STREAM)) {
+        try {
+          probe.connect(new LocalSocketAddress(path, LocalSocketAddress.Namespace.FILESYSTEM));
+          active = true;
+        } catch (IOException ignored) {
+        }
+      }
+      if (active) {
+        throw new IOException("socket path already has an active listener");
+      }
+      try {
+        Os.unlink(path);
+      } catch (ErrnoException error) {
+        throw error.rethrowAsIOException();
+      }
+    }
+
+    private static void removeOwnedSocketNode(String path, long pathDevice, long pathInode)
+        throws IOException {
+      final StructStat status;
+      try {
+        status = Os.lstat(path);
+      } catch (ErrnoException error) {
+        if (error.errno == OsConstants.ENOENT) {
+          return;
+        }
+        throw error.rethrowAsIOException();
+      }
+      if (!OsConstants.S_ISSOCK(status.st_mode)
+          || status.st_dev != pathDevice
+          || status.st_ino != pathInode) {
+        return;
+      }
+      try {
+        Os.unlink(path);
+      } catch (ErrnoException error) {
+        throw error.rethrowAsIOException();
       }
     }
   }

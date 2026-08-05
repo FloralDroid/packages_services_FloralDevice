@@ -17,7 +17,6 @@
 #include "floral/stream/transport/HostVideoSink.h"
 
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -269,35 +268,6 @@ struct HostVideoSink::Impl {
 };
 
 HostVideoSink::HostVideoSink(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
-
-std::unique_ptr<HostVideoSink> HostVideoSink::Connect(const std::string& socketPath,
-                                                      const HostVideoSinkConfig& config,
-                                                      std::string* error) {
-    if (!ValidateConfig(config, error)) {
-        return nullptr;
-    }
-    sockaddr_un address{};
-    if (socketPath.empty() || socketPath.size() >= sizeof(address.sun_path)) {
-        SetError(error, "host video socket path is empty or too long");
-        return nullptr;
-    }
-
-    android::base::unique_fd socketFd(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
-    if (!socketFd.ok()) {
-        SetError(error, std::string("socket(AF_UNIX) failed: ") + std::strerror(errno));
-        return nullptr;
-    }
-
-    address.sun_family = AF_UNIX;
-    std::memcpy(address.sun_path, socketPath.c_str(), socketPath.size() + 1);
-    if (connect(socketFd.get(), reinterpret_cast<const sockaddr*>(&address), sizeof(address)) !=
-        0) {
-        SetError(error,
-                 std::string("connecting host video socket failed: ") + std::strerror(errno));
-        return nullptr;
-    }
-    return CreateFromConnectedSocket(std::move(socketFd), config, error);
-}
 
 std::unique_ptr<HostVideoSink> HostVideoSink::CreateFromConnectedSocket(
         android::base::unique_fd socket, const HostVideoSinkConfig& config, std::string* error) {
