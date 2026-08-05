@@ -419,6 +419,7 @@ cc_binary {
         "libfloral_device_runtime",
         "libfloral_stream_session",
         "libfloral_stream_transport",
+        "libfloral_unix_socket_server",
     ],
     shared_libs: [
         "android.hardware.common.fmq-V1-ndk_platform",
@@ -521,6 +522,7 @@ cc_test {
         "libfloral_hal_control",
         "libfloral_stream_audio",
         "libfloral_stream_transport",
+        "libfloral_unix_socket_server",
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
