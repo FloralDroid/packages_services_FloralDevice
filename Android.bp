@@ -86,6 +86,33 @@ aidl_interface {
     },
 }
 
+aidl_interface {
+    name: "floral.device.simulation",
+    // The host controls scenarios while HALs own sample generation and entropy.
+    owner: "floraldroid",
+    vendor_available: true,
+    local_include_dir: "aidl",
+    srcs: [
+        "aidl/floral/device/simulation/*.aidl",
+    ],
+    imports: [
+        "android.hardware.common-V2",
+        "android.hardware.common.fmq-V1",
+    ],
+    stability: "vintf",
+    backend: {
+        java: {
+            enabled: false,
+        },
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: true,
+        },
+    },
+}
+
 cc_defaults {
     name: "floral_device_common_defaults",
     cflags: [
@@ -355,13 +382,25 @@ cc_library_static {
         "topology/DisplayTopologyControlHandler.cpp",
         "topology/DisplayTopologyControlProtocol.cpp",
         "topology/DisplayTopologyStateService.cpp",
+        "simulation/ExternalStateRecord.cpp",
+        "simulation/SimulationControlHandler.cpp",
+        "simulation/SimulationControlProtocol.cpp",
+        "simulation/SimulationController.cpp",
+        "simulation/SimulationStateService.cpp",
     ],
     static_libs: [
+        "libaidlcommonsupport",
         "libfloral_hal_control",
     ],
     shared_libs: [
+        "android.hardware.common-V2-ndk_platform",
+        "android.hardware.common.fmq-V1-ndk_platform",
         "floral.device.display.topology-V1-ndk_platform",
+        "floral.device.simulation-V1-ndk_platform",
+        "libbase",
         "libbinder_ndk",
+        "libfmq",
+        "libutils",
     ],
     export_include_dirs: ["include"],
 }
@@ -428,6 +467,7 @@ cc_binary {
         "floral.device.audio-V1-ndk_platform",
         "floral.device.display-V1-ndk_platform",
         "floral.device.display.topology-V1-ndk_platform",
+        "floral.device.simulation-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
         "libcutils",
@@ -548,6 +588,7 @@ cc_test {
         "tests/DisplayTopologyStateServiceTest.cpp",
         "tests/FrameConsumerServiceTest.cpp",
         "tests/HardwareBufferImporterTest.cpp",
+        "tests/SimulationControlProtocolTest.cpp",
     ],
     static_libs: [
         "libfloral_hal_control_center",
@@ -559,14 +600,18 @@ cc_test {
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
+        "android.hardware.common.fmq-V1-ndk_platform",
         "android.hardware.graphics.common-V2-ndk_platform",
         "floral.device.display-V1-ndk_platform",
         "floral.device.display.topology-V1-ndk_platform",
+        "floral.device.simulation-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
         "libcutils",
+        "libfmq",
         "liblog",
         "libnativewindow",
+        "libutils",
     ],
     test_suites: ["device-tests"],
 }

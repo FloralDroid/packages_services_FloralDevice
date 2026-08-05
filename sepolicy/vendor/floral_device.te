@@ -1,0 +1,29 @@
+type floral_device, domain;
+type floral_device_exec, exec_type, vendor_file_type, file_type;
+
+init_daemon_domain(floral_device)
+binder_use(floral_device)
+binder_service(floral_device)
+add_service(floral_device, floral_device_service)
+
+# MediaCodec and EGL use standard allocator and codec HAL clients internally.
+hal_client_domain(floral_device, hal_configstore)
+hal_client_domain(floral_device, hal_graphics_allocator)
+hal_client_domain(floral_device, hal_omx)
+hal_client_domain(floral_device, hal_codec2)
+allow floral_device mediaserver_service:service_manager find;
+binder_call(floral_device, mediaserver)
+binder_call(mediaserver, floral_device)
+
+# The host mounts the transport directory under /mnt/vendor.
+allow floral_device mnt_vendor_file:dir rw_dir_perms;
+allow floral_device mnt_vendor_file:sock_file create_file_perms;
+allow floral_device self:unix_stream_socket create_stream_socket_perms;
+
+# EGL and the optional VA-API backend access the render node directly.
+allow floral_device gpu_device:dir r_dir_perms;
+allow floral_device gpu_device:chr_file rw_file_perms;
+allow floral_device ion_device:chr_file r_file_perms;
+allow floral_device dmabuf_system_heap_device:chr_file r_file_perms;
+
+get_prop(floral_device, vendor_floral_config_prop)

@@ -42,6 +42,8 @@
 namespace floral::device::control {
 namespace {
 
+namespace topology = display::topology;
+
 using topology::DisplayTopologyControlHandler;
 using topology::DisplayTopologyController;
 using topology::DisplayTopologyStateService;

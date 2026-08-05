@@ -26,11 +26,15 @@
 #include "floral/device/service/AudioEncoderControlHandler.h"
 #include "floral/device/service/VideoEncoderControlHandler.h"
 #include "floral/device/service/VideoFrameConsumerBackend.h"
+#include "floral/device/simulation/SimulationControlHandler.h"
+#include "floral/device/simulation/SimulationController.h"
+#include "floral/device/simulation/SimulationStateService.h"
 #include "floral/stream/audio/AudioStreamSession.h"
 
 #include <aidl/floral/device/audio/IAudioPcmSink.h>
 #include <aidl/floral/device/display/IFrameConsumer.h>
 #include <aidl/floral/device/display/topology/IDisplayTopologyState.h>
+#include <aidl/floral/device/simulation/ISimulationState.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android/binder_manager.h>
@@ -149,6 +153,11 @@ int main(int argc, char** argv) {
     auto topologyController =
             std::make_shared<floral::device::display::topology::DisplayTopologyController>(
                     topologyStateService);
+    auto simulationStateService =
+            ndk::SharedRefBase::make<floral::device::simulation::SimulationStateService>();
+    auto simulationController =
+            std::make_shared<floral::device::simulation::SimulationController>(
+                    simulationStateService);
     auto topologyControlHandler =
             std::make_shared<floral::device::display::topology::DisplayTopologyControlHandler>(
                     topologyController);
@@ -156,9 +165,12 @@ int main(int argc, char** argv) {
             std::make_shared<floral::device::service::VideoEncoderControlHandler>(videoControl);
     auto audioControlHandler =
             std::make_shared<floral::device::service::AudioEncoderControlHandler>(audioSession);
+    auto simulationControlHandler =
+            std::make_shared<floral::device::simulation::SimulationControlHandler>(
+                    simulationController);
     auto deviceControlHandler = std::make_shared<floral::device::control::DeviceControlHandler>(
             std::move(topologyControlHandler), std::move(audioControlHandler),
-            std::move(videoControlHandler));
+            std::move(videoControlHandler), std::move(simulationControlHandler));
     const std::string audioPcmInstance =
             std::string(aidl::floral::device::audio::IAudioPcmSink::descriptor) + "/default";
     const std::string frameInstance =
@@ -166,6 +178,9 @@ int main(int argc, char** argv) {
     const std::string topologyStateInstance =
             std::string(
                     aidl::floral::device::display::topology::IDisplayTopologyState::descriptor) +
+            "/default";
+    const std::string simulationStateInstance =
+            std::string(aidl::floral::device::simulation::ISimulationState::descriptor) +
             "/default";
 
     ABinderProcess_setThreadPoolMaxThreadCount(4);
@@ -189,6 +204,13 @@ int main(int argc, char** argv) {
                    << status;
         return 1;
     }
+    status = AServiceManager_addService(simulationStateService->asBinder().get(),
+                                        simulationStateInstance.c_str());
+    if (status != STATUS_OK) {
+        LOG(ERROR) << "failed to register " << simulationStateInstance << ": binder status "
+                   << status;
+        return 1;
+    }
 
     std::string controlError;
     std::unique_ptr<floral::device::control::HostControlChannel> controlChannel =
@@ -199,8 +221,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    LOG(INFO) << frameInstance << ", " << audioPcmInstance << " and " << topologyStateInstance
-              << " are ready; host control channel started";
+    LOG(INFO) << frameInstance << ", " << audioPcmInstance << ", " << topologyStateInstance
+              << " and " << simulationStateInstance << " are ready; host control channel started";
     ABinderProcess_joinThreadPool();
     LOG(ERROR) << "Binder thread pool exited unexpectedly";
     return 1;

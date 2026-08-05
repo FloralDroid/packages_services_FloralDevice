@@ -1,0 +1,4 @@
+binder_use(hal_audio_default)
+allow hal_audio_default floral_device_service:service_manager find;
+binder_call(hal_audio_default, floral_device)
+binder_call(floral_device, hal_audio_default)

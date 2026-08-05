@@ -1,0 +1,4 @@
+floral.device.audio.IAudioPcmSink/default                         u:object_r:floral_device_service:s0
+floral.device.display.IFrameConsumer/default                      u:object_r:floral_device_service:s0
+floral.device.display.topology.IDisplayTopologyState/default      u:object_r:floral_device_service:s0
+floral.device.simulation.ISimulationState/default                 u:object_r:floral_device_service:s0

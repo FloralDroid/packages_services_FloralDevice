@@ -24,10 +24,12 @@ namespace floral::device::control {
 
 DeviceControlHandler::DeviceControlHandler(std::shared_ptr<ControlRequestHandler> topology_handler,
                                            std::shared_ptr<ControlRequestHandler> audio_handler,
-                                           std::shared_ptr<ControlRequestHandler> video_handler)
+                                           std::shared_ptr<ControlRequestHandler> video_handler,
+                                           std::shared_ptr<ControlRequestHandler> simulation_handler)
     : topology_handler_(std::move(topology_handler)),
       audio_handler_(std::move(audio_handler)),
-      video_handler_(std::move(video_handler)) {}
+      video_handler_(std::move(video_handler)),
+      simulation_handler_(std::move(simulation_handler)) {}
 
 bool DeviceControlHandler::Handle(const ControlRequest& request, ControlResponse* response,
                                   std::string* error) {
@@ -58,6 +60,23 @@ bool DeviceControlHandler::Handle(const ControlRequest& request, ControlResponse
                 return video_handler_->Handle(request, response, error);
             }
             break;
+        case ControlCommandId::kSetMotionConfig:
+        case ControlCommandId::kSetEnvironmentConfig:
+        case ControlCommandId::kPushExternalPoseBatch:
+        case ControlCommandId::kResetSensorSimulation:
+        case ControlCommandId::kGetSensorSimulationConfig:
+        case ControlCommandId::kListSensors:
+        case ControlCommandId::kGetSensorSnapshot:
+        case ControlCommandId::kSetGnssConfig:
+        case ControlCommandId::kPushExternalGnssBatch:
+        case ControlCommandId::kResetGnssSimulation:
+        case ControlCommandId::kGetGnssConfig:
+        case ControlCommandId::kGetGnssCapabilities:
+        case ControlCommandId::kGetGnssSnapshot:
+            if (simulation_handler_ != nullptr) {
+                return simulation_handler_->Handle(request, response, error);
+            }
+            break;
         case ControlCommandId::kGenericError:
             break;
     }
@@ -75,6 +94,9 @@ void DeviceControlHandler::OnAuthorityLeaseExpired() {
     }
     if (audio_handler_ != nullptr) {
         audio_handler_->OnAuthorityLeaseExpired();
+    }
+    if (simulation_handler_ != nullptr) {
+        simulation_handler_->OnAuthorityLeaseExpired();
     }
 }
 

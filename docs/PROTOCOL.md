@@ -231,19 +231,217 @@ invalidates registered source buffers, and starts with new codec configuration
 and a key frame. Lower frame rates are also enforced at frame ingress so the
 encoder does not continue receiving every compositor frame.
 
+### Sensor and GNSS simulation commands
+
+Command ids `0x0400` through `0x0406` control and inspect ordinary phone
+sensors. Command ids `0x0500` through `0x0505` do the same for GNSS. These are
+FHC1 request/response operations; no sensor or GNSS operation is added to FDO1.
+All floats and doubles below are IEEE 754 values serialized in network byte
+order. Simulation payload version is `1`.
+
+The host selects coarse ground truth. Final measurements are never supplied by
+the host: noise, bias drift, environmental drift, GNSS error, satellite state,
+and NMEA output are generated inside Android. Source `0` selects autonomous
+generation and source `1` selects the optional external ground-truth stream.
+Motion profiles are `0` stationary, `1` walking, `2` running, and `3` vehicle.
+
+| Command | Name | Request payload | Response payload |
+| ---: | --- | --- | --- |
+| `0x0400` | SetMotionConfig | 24-byte motion config | 16-byte update |
+| `0x0401` | SetEnvironmentConfig | 24-byte environment config | 16-byte update |
+| `0x0402` | PushExternalPoseBatch | 8-byte batch header plus records | 16-byte update |
+| `0x0403` | ResetSensorSimulation | Empty | 16-byte update |
+| `0x0404` | GetSensorSimulationConfig | Empty | 40-byte sensor config |
+| `0x0405` | ListSensors | Empty | Variable sensor catalog |
+| `0x0406` | GetSensorSnapshot | Empty | Variable sensor snapshot |
+| `0x0500` | SetGnssConfig | 56-byte GNSS config | 16-byte update |
+| `0x0501` | PushExternalGnssBatch | 8-byte batch header plus records | 16-byte update |
+| `0x0502` | ResetGnssSimulation | Empty | 16-byte update |
+| `0x0503` | GetGnssConfig | Empty | 64-byte GNSS config |
+| `0x0504` | GetGnssCapabilities | Empty | 16-byte capabilities |
+| `0x0505` | GetGnssSnapshot | Empty | Variable GNSS snapshot |
+
+Every mutating command returns this update payload:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 4 | Result: `0` applied, `1` unchanged, `2` invalid, `3` not ready |
+| 4 | 4 | Applied external-record count; zero for configuration operations |
+| 8 | 8 | Current simulation generation |
+
+Applied and unchanged mutations renew the FHC1 authority lease. Queries do not.
+When the control lease expires, external sources return to autonomous mode;
+configured autonomous values remain available. Reset restores the corresponding
+sensor or GNSS defaults and also selects autonomous mode.
+
+The `0x0400` motion request is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 2 | Simulation payload version, `1` |
+| 2 | 2 | Payload size, `24` |
+| 4 | 4 | Motion source, `0` autonomous or `1` external |
+| 8 | 4 | Motion profile, `0` through `3` |
+| 12 | 4 | Transition duration in milliseconds, at most `60000` |
+| 16 | 8 | Reserved, must be zero |
+
+The `0x0401` environment request is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 2 | Simulation payload version, `1` |
+| 2 | 2 | Payload size, `24` |
+| 4 | 4 | Ambient light in lux, `0` through `100000` |
+| 8 | 4 | Proximity distance in centimeters, `0` through `5` |
+| 12 | 4 | Pressure in hPa, `300` through `1100` |
+| 16 | 4 | Transition duration in milliseconds, at most `60000` |
+| 20 | 4 | Reserved, must be zero |
+
+The `0x0500` GNSS request is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 2 | Simulation payload version, `1` |
+| 2 | 2 | Payload size, `56` |
+| 4 | 4 | GNSS source, `0` autonomous or `1` external |
+| 8 | 4 | Enabled, `0` or `1` |
+| 12 | 4 | Reserved, must be zero |
+| 16 | 8 | Anchor latitude in degrees, `-90` through `90` |
+| 24 | 8 | Anchor longitude in degrees, `-180` through `180` |
+| 32 | 8 | Anchor altitude in meters |
+| 40 | 4 | Ground speed in m/s, `0` through `150` |
+| 44 | 4 | Bearing in degrees, `0` inclusive through `360` exclusive |
+| 48 | 4 | Transition duration in milliseconds, at most `60000` |
+| 52 | 4 | Reserved, must be zero |
+
+Both external-stream commands begin with the same batch header. A batch has 1
+through 512 records and its total FHC1 payload must remain within 65536 bytes.
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 2 | Simulation payload version, `1` |
+| 2 | 2 | Record size, `56` |
+| 4 | 2 | Record count, `1` through `512` |
+| 6 | 2 | Reserved, must be zero |
+
+Each `0x0402` pose record is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 8 | Sample age relative to guest receipt time in nanoseconds, at most 2 seconds |
+| 8 | 4 | Flags; bit 0 marks a discontinuity, all other bits zero |
+| 12 | 4 | Reserved, must be zero |
+| 16 | 16 | Device-to-world quaternion X, Y, Z, W |
+| 32 | 12 | World-frame linear acceleration X, Y, Z in m/s2 |
+| 44 | 12 | Device-frame angular velocity X, Y, Z in rad/s |
+
+Each `0x0501` GNSS record is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 8 | Sample age relative to guest receipt time in nanoseconds, at most 10 seconds |
+| 8 | 4 | Flags; bit 0 marks a discontinuity, all other bits zero |
+| 12 | 4 | Reserved, must be zero |
+| 16 | 8 | Latitude in degrees |
+| 24 | 8 | Longitude in degrees |
+| 32 | 8 | Altitude in meters |
+| 40 | 4 | Ground speed in m/s |
+| 44 | 4 | Bearing in degrees |
+| 48 | 4 | Horizontal ground-truth accuracy in meters |
+| 52 | 4 | Vertical ground-truth accuracy in meters |
+
+`age_ns` avoids assuming that host and guest monotonic clocks share an epoch.
+The service subtracts it from guest `CLOCK_BOOTTIME`. Pose truth is considered
+fresh for 500 ms and GNSS truth for 2 seconds. Once stale, generation continues
+from the autonomous model instead of replaying old external samples.
+
+The `0x0404` sensor-config response is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 2 | Simulation payload version, `1` |
+| 2 | 2 | Header size, `40` |
+| 4 | 4 | Reserved, zero |
+| 8 | 8 | Generation |
+| 16 | 4 | Motion source |
+| 20 | 4 | Motion profile |
+| 24 | 4 | Target light in lux |
+| 28 | 4 | Target proximity in centimeters |
+| 32 | 4 | Target pressure in hPa |
+| 36 | 4 | Transition duration in milliseconds |
+
+The `0x0405` catalog starts with a 16-byte header: version and header size at
+offsets 0 and 2, sensor count at 4, and generation at 8. Each following record
+has a 24-byte fixed part followed by its UTF-8 name and zero padding to four
+bytes. The fixed part contains record size and name length as 16-bit values at
+offsets 0 and 2, then handle, Android sensor type, flags, minimum delay in
+microseconds, and maximum delay in microseconds as 32-bit values at offsets 4,
+8, 12, 16, and 20.
+
+The `0x0406` snapshot starts with a 24-byte header: version and header size at
+offsets 0 and 2, reading count at 4, generation at 8, and guest boot timestamp
+in nanoseconds at 16. Each reading has record size and float-value count as
+16-bit values at offsets 0 and 2, handle and Android sensor type at 4 and 8, a
+zero reserved word at 12, step count at 16, and values beginning at 24. The HAL
+publishes this cache at no more than 10 Hz; it is for inspection rather than a
+replacement high-rate telemetry channel.
+
+The `0x0503` GNSS-config response is:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 2 | Simulation payload version, `1` |
+| 2 | 2 | Header size, `64` |
+| 4 | 4 | Reserved, zero |
+| 8 | 8 | Generation |
+| 16 | 4 | GNSS source |
+| 20 | 4 | Enabled, `0` or `1` |
+| 24 | 8 | Anchor latitude in degrees |
+| 32 | 8 | Anchor longitude in degrees |
+| 40 | 8 | Anchor altitude in meters |
+| 48 | 4 | Ground speed in m/s |
+| 52 | 4 | Bearing in degrees |
+| 56 | 4 | Transition duration in milliseconds |
+| 60 | 4 | Reserved, zero |
+
+The `0x0504` response contains version and size `16` at offsets 0 and 2, a zero
+reserved word at 4, and a 64-bit capability mask at 8. Bits 0 through 4 mean
+location, satellite status, NMEA, multiple constellations, and external truth
+stream respectively.
+
+The `0x0505` response has an 88-byte header followed by 24-byte satellite
+records. The header contains version, header size, satellite count, generation,
+guest elapsed-realtime nanoseconds, UTC milliseconds, and a 32-bit fix flag at
+offsets 0, 2, 4, 8, 16, 24, and 32. Offset 36 is reserved. Latitude, longitude,
+and altitude doubles are at 40, 48, and 56. Speed, bearing, horizontal accuracy,
+vertical accuracy, speed accuracy, and bearing accuracy floats are at offsets
+64 through 84. Each satellite record contains 16-bit record size and used-in-fix
+flag, 32-bit SVID and constellation, then C/N0, elevation, and azimuth floats.
+
+Internally, FloralDevice fans external truth out to independent HAL readers as
+fixed 112-byte `FSS1` FMQ records. The record contains magic `FSS1`, version and
+size at offsets 0, 4, and 6; generation at 8; flags at 16; reserved zero at 20;
+guest boot timestamp at 24; pose fields at 32 through 68; GNSS fields at 72
+through 108. Flag bits 0, 1, and 2 mean pose present, GNSS present, and
+discontinuity. FSS1 is an internal system/vendor transport and is not sent over
+the host socket.
+
 ### 中文约束摘要
 
 FHC1 使用 24 字节固定大端帧头。`command_id` 只标识命令，`route_kind` 的高
 四位固定为 `0001`，接着四位区分请求、响应、事件和错误，最低八位当前必须
 为零。这样不会把请求/响应方向和命令编号混在一个字段里，也不需要为每个
 响应消耗另一组命令号。当前实现包括完整快照拓扑命令 `0x0100`、音频编码配置
-命令 `0x0200` 和视频编码配置命令 `0x0300`；主屏
+命令 `0x0200`、视频编码配置命令 `0x0300`、传感器命令 `0x0400` 至 `0x0406`
+以及 GNSS 命令 `0x0500` 至 `0x0505`；主屏
 `displayId=0` 永久存在，控制 socket 断开后外屏默认保留三秒，租约到期只
 清空外屏。音频码率通过 `0x0200` 原位调整。视频配置通过字段掩码支持部分更新：
 只改码率时沿用当前 generation，
 帧率、编码分辨率、I 帧间隔、后端或编码格式变化时重建会话并递增 generation。
 编码分辨率不会改变 Android 逻辑显示尺寸和输入坐标。控制面不承载触摸、键盘
-或鼠标事件。
+或鼠标事件。宿主只提供低频配置和可选的高频真值，噪声、偏置漂移、GNSS 误差、
+卫星状态和环境缓慢变化均在 Android 内部生成；查询命令返回当前配置、目录和
+内部状态快照，不作为连续遥测通道。
 
 ## FDO1 device-operation channel
 

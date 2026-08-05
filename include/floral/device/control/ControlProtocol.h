@@ -56,6 +56,19 @@ enum class ControlCommandId : uint16_t {
     kReplaceDisplayTopology = 0x0100,
     kSetAudioEncoderConfig = 0x0200,
     kSetVideoEncoderConfig = 0x0300,
+    kSetMotionConfig = 0x0400,
+    kSetEnvironmentConfig = 0x0401,
+    kPushExternalPoseBatch = 0x0402,
+    kResetSensorSimulation = 0x0403,
+    kGetSensorSimulationConfig = 0x0404,
+    kListSensors = 0x0405,
+    kGetSensorSnapshot = 0x0406,
+    kSetGnssConfig = 0x0500,
+    kPushExternalGnssBatch = 0x0501,
+    kResetGnssSimulation = 0x0502,
+    kGetGnssConfig = 0x0503,
+    kGetGnssCapabilities = 0x0504,
+    kGetGnssSnapshot = 0x0505,
 };
 
 enum class ControlError : uint32_t {

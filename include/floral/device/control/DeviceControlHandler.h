@@ -28,7 +28,8 @@ class DeviceControlHandler final : public ControlRequestHandler {
   public:
     DeviceControlHandler(std::shared_ptr<ControlRequestHandler> topology_handler,
                          std::shared_ptr<ControlRequestHandler> audio_handler,
-                         std::shared_ptr<ControlRequestHandler> video_handler);
+                         std::shared_ptr<ControlRequestHandler> video_handler,
+                         std::shared_ptr<ControlRequestHandler> simulation_handler);
 
     bool Handle(const ControlRequest& request, ControlResponse* response,
                 std::string* error) override;
@@ -38,6 +39,7 @@ class DeviceControlHandler final : public ControlRequestHandler {
     const std::shared_ptr<ControlRequestHandler> topology_handler_;
     const std::shared_ptr<ControlRequestHandler> audio_handler_;
     const std::shared_ptr<ControlRequestHandler> video_handler_;
+    const std::shared_ptr<ControlRequestHandler> simulation_handler_;
 };
 
 }  // namespace floral::device::control

@@ -36,7 +36,11 @@ or hardware encoding and sends encoded access units to a host Unix socket.
   service-owned AHardwareBuffers instead of borrowing Binder parcel file
   descriptors.
 - `libfloral_hal_control_center` is the single topology controller,
-  read-only state publisher, and FHC1 full-snapshot command handler.
+  simulation controller, read-only state publisher, and FHC1 command handler.
+- `floral.device.simulation` is the stable system/vendor AIDL contract used by
+  the sensor and GNSS HALs. Configuration changes use Binder callbacks, while
+  optional high-rate ground truth uses one independent synchronized FMQ per
+  HAL reader.
 - `floral_device_service` is the production Binder endpoint and current
   single-display video backend. It activates only while the host video socket
   is available and owns the selected encoder session and reconnect generation.
@@ -45,8 +49,8 @@ or hardware encoding and sends encoded access units to a host Unix socket.
 input, dynamic bitrate, output integrity, portrait rotation, buffer reuse,
 transport, and x86_64 VA-API DRM PRIME/VPP integration.
 `floral_device_display_tests` covers cross-process HardwareBuffer ownership,
-descriptor validation, topology publication, FHC1 parsing, and control-lease
-behavior.
+descriptor validation, topology publication, FHC1 parsing including sensor and
+GNSS queries, external-state validation, and control-lease behavior.
 `floral_input_protocol_tests_host` covers FDO1 framing, target leases, epochs,
 multi-pointer actions, coordinate conversion, and cancellation cleanup.
 
@@ -126,15 +130,19 @@ Unix Socket。
   带版本 system/vendor AIDL 契约。
 - `libfloral_device_display_ingress` 把传输来的原生句柄克隆为服务持有的
   AHardwareBuffer，而不是借用 Binder Parcel 文件描述符。
-- `libfloral_hal_control_center` 是唯一的拓扑控制器、只读状态发布者和
-  FHC1 完整快照命令处理器。
+- `libfloral_hal_control_center` 是唯一的拓扑与仿真控制器、只读状态发布者和
+  FHC1 命令处理器。
+- `floral.device.simulation` 是传感器及 GNSS HAL 使用的稳定 system/vendor
+  AIDL 契约。配置变更通过 Binder 回调发送，可选的高频真值为每个 HAL 读取者
+  分配独立的同步 FMQ。
 - `floral_device_service` 是生产 Binder 端点和当前的单显示器视频后端。只有宿主
   视频 Socket 可用时才激活，并持有所选编码器会话和重连 generation。
 
 `floral_stream_codec_tests` 覆盖软件 MediaCodec 选择、EGL Surface 输入、动态
 码率、输出完整性、竖屏旋转、缓冲区复用、传输和 x86_64 VA-API DRM
 PRIME/VPP 集成。`floral_device_display_tests` 覆盖跨进程 HardwareBuffer
-所有权、描述符校验、拓扑发布、FHC1 解析和控制权租约行为。
+所有权、描述符校验、拓扑发布、包括传感器与 GNSS 查询在内的 FHC1 解析、外部
+状态校验和控制权租约行为。
 `floral_input_protocol_tests_host` 覆盖 FDO1 帧解析、目标租约、epoch、多指动作、
 坐标转换和取消清理。
 
