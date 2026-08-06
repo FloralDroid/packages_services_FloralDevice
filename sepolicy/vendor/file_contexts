@@ -1,3 +1,5 @@
 /(vendor|system/vendor)/bin/hw/floral_device_service    u:object_r:floral_device_exec:s0
 /dev/dri                                                u:object_r:gpu_device:s0
 /dev/dri/renderD[0-9]+                                  u:object_r:gpu_device:s0
+/ipc/floral_stream/operate\.sock                        u:object_r:floral_input_socket_file:s0
+/ipc/floral_stream(/.*)?                                u:object_r:floral_stream_file:s0

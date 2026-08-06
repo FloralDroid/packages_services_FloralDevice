@@ -49,9 +49,12 @@
 
 namespace {
 
-constexpr char kDefaultVideoSocketPath[] = "/mnt/vendor/floral_stream/video.sock";
-constexpr char kDefaultAudioSocketPath[] = "/mnt/vendor/floral_stream/audio.sock";
-constexpr char kDefaultControlSocketPath[] = "/mnt/vendor/floral_stream/control.sock";
+// /ipc is created by Redroid before vendor services start and is not replaced
+// by Android's later /mnt tmpfs mount. It is therefore safe for Docker bind
+// mounts and shared by the native and Java socket endpoints.
+constexpr char kDefaultVideoSocketPath[] = "/ipc/floral_stream/video.sock";
+constexpr char kDefaultAudioSocketPath[] = "/ipc/floral_stream/audio.sock";
+constexpr char kDefaultControlSocketPath[] = "/ipc/floral_stream/control.sock";
 constexpr char kDefaultVaDevicePath[] = "/dev/dri/renderD128";
 
 uint32_t BoundedProperty(const char* name, uint32_t defaultValue, uint32_t minimum,

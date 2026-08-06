@@ -15,7 +15,10 @@ allow floral_device mediaserver_service:service_manager find;
 binder_call(floral_device, mediaserver)
 binder_call(mediaserver, floral_device)
 
-# The host mounts the transport directory under /mnt/vendor.
+# The host mounts the transport directory under /ipc. Keep the legacy
+# /mnt/vendor permissions for explicit socket-path overrides.
+allow floral_device floral_stream_file:dir rw_dir_perms;
+allow floral_device floral_stream_file:sock_file create_file_perms;
 allow floral_device mnt_vendor_file:dir rw_dir_perms;
 allow floral_device mnt_vendor_file:sock_file create_file_perms;
 allow floral_device self:unix_stream_socket create_stream_socket_perms;

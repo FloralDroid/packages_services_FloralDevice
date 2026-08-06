@@ -1,0 +1,12 @@
+type floral_stream_file, file_type;
+
+# The platform input application and vendor daemon share only the directory.
+# operate.sock remains a core-owned socket while the other endpoints retain the
+# vendor directory type, preserving the Treble socket boundary.
+type floral_input_socket_file, file_type, coredomain_socket;
+
+allow { platform_app priv_app } floral_stream_file:dir rw_dir_perms;
+type_transition platform_app floral_stream_file:sock_file floral_input_socket_file "operate.sock";
+type_transition priv_app floral_stream_file:sock_file floral_input_socket_file "operate.sock";
+allow { platform_app priv_app } floral_input_socket_file:sock_file create_file_perms;
+get_prop({ platform_app priv_app }, vendor_floral_config_prop)

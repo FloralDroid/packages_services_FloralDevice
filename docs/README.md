@@ -83,10 +83,15 @@ VA device.
 ### Control and lifecycle
 
 The container listens on the four filesystem endpoints `video.sock`,
-`audio.sock`, `control.sock`, and `operate.sock`; the host gateway connects to
-each endpoint. The corresponding `ro.boot.floral_*_socket` properties change
-their paths. A valid full topology
+`audio.sock`, `control.sock`, and `operate.sock` below
+`/ipc/floral_stream`; the host gateway connects to each endpoint. Docker should
+bind the host transport directory to `/ipc/floral_stream`. The corresponding
+`ro.boot.floral_*_socket` properties change their paths. A valid full topology
 snapshot owns the external displays until another full snapshot replaces it.
+
+```text
+-v /root/floral/instance-01:/ipc/floral_stream:rw
+```
 
 After a disconnect, the service retains external displays for three seconds so
 a host process can reconnect without hotplug churn.
@@ -171,10 +176,17 @@ MediaCodec 可以原地更新码率。VA-API 在码率变化时先排空待处�
 
 ### 控制与生命周期
 
-容器默认监听 `video.sock`、`audio.sock`、`control.sock` 和 `operate.sock`
-四个文件系统端点，宿主网关分别连接这些端点；对应的
+容器默认在 `/ipc/floral_stream` 下监听 `video.sock`、`audio.sock`、
+`control.sock` 和 `operate.sock` 四个文件系统端点，宿主网关分别连接这些端点；对应的
 `ro.boot.floral_*_socket` 属性可修改路径。一个有效的完整拓扑快照将持有外屏
 控制权，直到另一份完整快照替换它。
+
+Docker 只需要把宿主传输目录 bind mount 到 `/ipc/floral_stream`。Android init
+会在启动早期整理该目录的共享权限，不需要宿主机查询应用 UID 后再执行 `chown`。
+
+```text
+-v /root/floral/instance-01:/ipc/floral_stream:rw
+```
 
 连接断开后，服务保留外屏三秒，使宿主进程能够在不触发热插拔抖动的情况下重连。
 `ro.boot.floral_control_disconnect_lease_ms` 可修改该有界租约。租约到期会

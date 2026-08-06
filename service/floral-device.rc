@@ -1,3 +1,10 @@
+on early-init
+    # Docker bind mounts this directory for the host transport endpoints. The
+    # write/execute bits for other users are intentional: the native service
+    # runs as system while the persistent input application has a per-build UID.
+    mkdir /ipc/floral_stream 0773 root root
+    restorecon_recursive /ipc/floral_stream
+
 service vendor.floral-device /vendor/bin/hw/floral_device_service
     class hal
     user system

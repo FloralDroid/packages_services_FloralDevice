@@ -37,7 +37,9 @@ import java.io.IOException;
 final class OperationServer
     implements Runnable, InputStateMachine.InvalidationListener, DisplayTargetResolver.Listener {
   private static final String TAG = "FloralInput";
-  private static final String DEFAULT_SOCKET_PATH = "/mnt/vendor/floral_stream/operate.sock";
+  // Keep the operation endpoint beside the native endpoints. Redroid's /ipc
+  // mount remains visible after Android starts, unlike the /mnt tmpfs mount.
+  private static final String DEFAULT_SOCKET_PATH = "/ipc/floral_stream/operate.sock";
   private static final long RECONNECT_DELAY_MILLIS = 250;
 
   private final Object outputLock = new Object();
