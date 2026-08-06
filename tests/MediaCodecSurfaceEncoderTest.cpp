@@ -29,6 +29,7 @@
 #include <aidlcommonsupport/NativeHandle.h>
 #include <gtest/gtest.h>
 #include <sys/socket.h>
+#include <vndk/hardware_buffer.h>
 
 #include <algorithm>
 #include <chrono>
@@ -320,7 +321,8 @@ TEST(EncoderSessionTest, EncodesTransportedGuestBufferAndPreservesFenceOwnership
     description.layers = 1;
     description.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
     description.usage =
-            AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+            AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN |
+            AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
     AHardwareBuffer* rawBuffer = nullptr;
     ASSERT_EQ(AHardwareBuffer_allocate(&description, &rawBuffer), 0);
     HardwareBufferPtr sourceBuffer(rawBuffer, AHardwareBuffer_release);

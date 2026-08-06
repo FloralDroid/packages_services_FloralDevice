@@ -22,6 +22,7 @@
 #include <GLES2/gl2ext.h>
 
 #include <android-base/logging.h>
+#include <android-base/properties.h>
 
 #include <poll.h>
 #include <algorithm>
@@ -32,6 +33,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace floral::stream::codec {
 namespace {
@@ -47,10 +49,20 @@ void main() {
 }
 )";
 
-constexpr char kFragmentShader[] = R"(
+constexpr char kExternalFragmentShader[] = R"(
 #extension GL_OES_EGL_image_external : require
 precision mediump float;
 uniform samplerExternalOES source_texture;
+varying vec2 texture_coordinate_out;
+
+void main() {
+    gl_FragColor = texture2D(source_texture, texture_coordinate_out);
+}
+)";
+
+constexpr char kTexture2dFragmentShader[] = R"(
+precision mediump float;
+uniform sampler2D source_texture;
 varying vec2 texture_coordinate_out;
 
 void main() {
@@ -147,12 +159,14 @@ GLuint CompileShader(GLenum type, const char* source, std::string* error) {
     return 0;
 }
 
-GLuint CreateProgram(std::string* error) {
+GLuint CreateProgram(bool useCpuUpload, std::string* error) {
     const GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, kVertexShader, error);
     if (vertexShader == 0) {
         return 0;
     }
-    const GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, kFragmentShader, error);
+    const char* fragmentSource =
+            useCpuUpload ? kTexture2dFragmentShader : kExternalFragmentShader;
+    const GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, fragmentSource, error);
     if (fragmentShader == 0) {
         glDeleteShader(vertexShader);
         return 0;
@@ -246,17 +260,22 @@ class ScopedEglContextBinding {
 struct EglFrameCopier::Impl {
     struct ImportedBuffer {
         AHardwareBuffer* hardware_buffer = nullptr;
+        AHardwareBuffer_Desc description{};
         EGLImageKHR image = EGL_NO_IMAGE_KHR;
         GLuint texture = 0;
     };
 
     Impl(ANativeWindow* outputWindow, VideoGeometry videoGeometry)
-        : output_window(outputWindow), geometry(videoGeometry) {
+        : output_window(outputWindow),
+          geometry(videoGeometry),
+          cpu_upload(android::base::GetProperty("gralloc.gbm.backend", "") == "software") {
         ANativeWindow_acquire(output_window);
     }
 
     Impl(AHardwareBuffer* outputBuffer, VideoGeometry videoGeometry)
-        : output_buffer(outputBuffer), geometry(videoGeometry) {
+        : output_buffer(outputBuffer),
+          geometry(videoGeometry),
+          cpu_upload(android::base::GetProperty("gralloc.gbm.backend", "") == "software") {
         AHardwareBuffer_acquire(output_buffer);
     }
 
@@ -312,9 +331,11 @@ struct EglFrameCopier::Impl {
         }
 
         const char* eglExtensions = eglQueryString(display, EGL_EXTENSIONS);
-        if (!HasExtension(eglExtensions, "EGL_ANDROID_get_native_client_buffer") ||
-            !HasExtension(eglExtensions, "EGL_ANDROID_image_native_buffer") ||
-            !HasExtension(eglExtensions, "EGL_KHR_image_base") ||
+        const bool needsNativeBufferImport = !cpu_upload || output_buffer != nullptr;
+        if ((needsNativeBufferImport &&
+             (!HasExtension(eglExtensions, "EGL_ANDROID_get_native_client_buffer") ||
+              !HasExtension(eglExtensions, "EGL_ANDROID_image_native_buffer") ||
+              !HasExtension(eglExtensions, "EGL_KHR_image_base"))) ||
             (output_window != nullptr &&
              !HasExtension(eglExtensions, "EGL_ANDROID_presentation_time"))) {
             return SetError(error, "EGL implementation lacks required Android buffer extensions");
@@ -393,7 +414,7 @@ struct EglFrameCopier::Impl {
         }
 
         const char* glExtensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
-        if (!HasExtension(glExtensions, "GL_OES_EGL_image_external") ||
+        if ((!cpu_upload && !HasExtension(glExtensions, "GL_OES_EGL_image_external")) ||
             (output_buffer != nullptr && !HasExtension(glExtensions, "GL_OES_EGL_image"))) {
             return SetError(error, "OpenGL ES implementation lacks required EGL image support");
         }
@@ -402,7 +423,7 @@ struct EglFrameCopier::Impl {
             return false;
         }
 
-        program = CreateProgram(error);
+        program = CreateProgram(cpu_upload, error);
         if (program == 0) {
             return false;
         }
@@ -458,7 +479,8 @@ struct EglFrameCopier::Impl {
         if (!acquireFence.ok()) {
             return true;
         }
-        if (!native_fences) {
+        // CPU access must wait for the producer before mapping the shared-memory buffer.
+        if (cpu_upload || !native_fences) {
             return WaitForFenceFd(acquireFence.get(), error);
         }
 
@@ -505,6 +527,56 @@ struct EglFrameCopier::Impl {
         return releaseFence;
     }
 
+    bool UploadCpuBuffer(ImportedBuffer* buffer, android::base::unique_fd* releaseFence,
+                         std::string* error) {
+        const AHardwareBuffer_Desc& description = buffer->description;
+        if (description.stride < description.width) {
+            return SetError(error, "CPU-readable hardware buffer has an invalid row stride");
+        }
+
+        void* pixels = nullptr;
+        const int lockStatus = AHardwareBuffer_lock(buffer->hardware_buffer,
+                                                    AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1,
+                                                    nullptr, &pixels);
+        if (lockStatus != 0 || pixels == nullptr) {
+            return SetError(error, "AHardwareBuffer_lock for CPU upload failed with status " +
+                                           std::to_string(lockStatus));
+        }
+
+        constexpr size_t kBytesPerPixel = 4;
+        const size_t rowBytes = static_cast<size_t>(description.width) * kBytesPerPixel;
+        const size_t uploadBytes = rowBytes * description.height;
+        const void* uploadPixels = pixels;
+        if (description.stride != description.width) {
+            upload_scratch.resize(uploadBytes);
+            const auto* source = static_cast<const uint8_t*>(pixels);
+            for (uint32_t row = 0; row < description.height; ++row) {
+                std::memcpy(upload_scratch.data() + static_cast<size_t>(row) * rowBytes,
+                            source + static_cast<size_t>(row) * description.stride * kBytesPerPixel,
+                            rowBytes);
+            }
+            uploadPixels = upload_scratch.data();
+        }
+
+        glBindTexture(GL_TEXTURE_2D, buffer->texture);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(description.width),
+                        static_cast<GLsizei>(description.height), GL_RGBA, GL_UNSIGNED_BYTE,
+                        uploadPixels);
+        const GLenum uploadError = glGetError();
+
+        int32_t unlockFence = -1;
+        const int unlockStatus = AHardwareBuffer_unlock(buffer->hardware_buffer, &unlockFence);
+        releaseFence->reset(unlockFence);
+        if (unlockStatus != 0) {
+            return SetError(error, "AHardwareBuffer_unlock after CPU upload failed with status " +
+                                           std::to_string(unlockStatus));
+        }
+        if (uploadError != GL_NO_ERROR) {
+            return SetGlError(error, "shared-memory texture upload", uploadError);
+        }
+        return true;
+    }
+
     void ReleaseImportedBuffer(ImportedBuffer* buffer) const {
         if (buffer->texture != 0) {
             glDeleteTextures(1, &buffer->texture);
@@ -533,7 +605,9 @@ struct EglFrameCopier::Impl {
     GLint position_location = -1;
     GLint texture_coordinate_location = -1;
     GLint source_texture_location = -1;
+    const bool cpu_upload;
     bool native_fences = false;
+    std::vector<uint8_t> upload_scratch;
     std::unordered_map<uint64_t, ImportedBuffer> buffers;
 };
 
@@ -597,6 +671,12 @@ bool EglFrameCopier::RegisterBuffer(AHardwareBuffer* buffer, uint64_t* outBuffer
         description.height != impl_->geometry.logical_height || description.layers != 1) {
         return SetError(error, "hardware buffer dimensions or layer count do not match session");
     }
+    if (impl_->cpu_upload &&
+        (description.format != AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM ||
+         (description.usage & AHARDWAREBUFFER_USAGE_PROTECTED_CONTENT) != 0)) {
+        return SetError(error,
+                        "software gralloc requires a CPU-readable, unprotected RGBA source");
+    }
 
     std::lock_guard lock(impl_->mutex);
     ScopedEglContextBinding current(impl_->display, impl_->surface, impl_->context, error);
@@ -611,27 +691,35 @@ bool EglFrameCopier::RegisterBuffer(AHardwareBuffer* buffer, uint64_t* outBuffer
     Impl::ImportedBuffer imported;
     AHardwareBuffer_acquire(buffer);
     imported.hardware_buffer = buffer;
-
-    EGLClientBuffer clientBuffer = eglGetNativeClientBufferANDROID(buffer);
-    if (clientBuffer == nullptr) {
-        impl_->ReleaseImportedBuffer(&imported);
-        return SetEglError(error, "eglGetNativeClientBufferANDROID");
-    }
-    const EGLint imageAttributes[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE};
-    imported.image = eglCreateImageKHR(impl_->display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
-                                       clientBuffer, imageAttributes);
-    if (imported.image == EGL_NO_IMAGE_KHR) {
-        impl_->ReleaseImportedBuffer(&imported);
-        return SetEglError(error, "eglCreateImageKHR");
-    }
+    imported.description = description;
 
     glGenTextures(1, &imported.texture);
-    glBindTexture(GL_TEXTURE_EXTERNAL_OES, imported.texture);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, imported.image);
+    const GLenum textureTarget = impl_->cpu_upload ? GL_TEXTURE_2D : GL_TEXTURE_EXTERNAL_OES;
+    glBindTexture(textureTarget, imported.texture);
+    glTexParameteri(textureTarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(textureTarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(textureTarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(textureTarget, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if (impl_->cpu_upload) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, static_cast<GLsizei>(description.width),
+                     static_cast<GLsizei>(description.height), 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     nullptr);
+    } else {
+        EGLClientBuffer clientBuffer = eglGetNativeClientBufferANDROID(buffer);
+        if (clientBuffer == nullptr) {
+            impl_->ReleaseImportedBuffer(&imported);
+            return SetEglError(error, "eglGetNativeClientBufferANDROID");
+        }
+        const EGLint imageAttributes[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE};
+        imported.image =
+                eglCreateImageKHR(impl_->display, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID,
+                                  clientBuffer, imageAttributes);
+        if (imported.image == EGL_NO_IMAGE_KHR) {
+            impl_->ReleaseImportedBuffer(&imported);
+            return SetEglError(error, "eglCreateImageKHR");
+        }
+        glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, imported.image);
+    }
     const GLenum importError = glGetError();
     if (imported.texture == 0 || importError != GL_NO_ERROR) {
         impl_->ReleaseImportedBuffer(&imported);
@@ -676,13 +764,20 @@ FrameCopyResult EglFrameCopier::CopyFrame(uint64_t bufferId, android::base::uniq
         return result;
     }
 
+    android::base::unique_fd cpuReleaseFence;
+    if (impl_->cpu_upload &&
+        !impl_->UploadCpuBuffer(&iterator->second, &cpuReleaseFence, error)) {
+        return result;
+    }
+
     glBindFramebuffer(GL_FRAMEBUFFER, impl_->output_framebuffer);
     glViewport(0, 0, static_cast<GLsizei>(impl_->geometry.coded_width),
                static_cast<GLsizei>(impl_->geometry.coded_height));
     glDisable(GL_BLEND);
     glUseProgram(impl_->program);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_EXTERNAL_OES, iterator->second.texture);
+    glBindTexture(impl_->cpu_upload ? GL_TEXTURE_2D : GL_TEXTURE_EXTERNAL_OES,
+                  iterator->second.texture);
     glUniform1i(impl_->source_texture_location, 0);
 
     glEnableVertexAttribArray(static_cast<GLuint>(impl_->position_location));
@@ -709,12 +804,20 @@ FrameCopyResult EglFrameCopier::CopyFrame(uint64_t bufferId, android::base::uniq
             SetGlError(error, "AHardwareBuffer render completion", finishError);
             return result;
         }
+        if (cpuReleaseFence.ok() && !WaitForFenceFd(cpuReleaseFence.get(), error)) {
+            return result;
+        }
         result.completed_synchronously = true;
         result.success = true;
         return result;
     }
 
-    result.release_fence = impl_->CreateReleaseFence(&result.completed_synchronously);
+    if (impl_->cpu_upload) {
+        result.release_fence = std::move(cpuReleaseFence);
+        result.completed_synchronously = !result.release_fence.ok();
+    } else {
+        result.release_fence = impl_->CreateReleaseFence(&result.completed_synchronously);
+    }
     if (eglPresentationTimeANDROID(impl_->display, impl_->surface, presentationTimeNanos) !=
         EGL_TRUE) {
         SetEglError(error, "eglPresentationTimeANDROID");
@@ -732,7 +835,7 @@ FrameCopyResult EglFrameCopier::CopyFrame(uint64_t bufferId, android::base::uniq
 
 bool EglFrameCopier::uses_native_fences() const {
     std::lock_guard lock(impl_->mutex);
-    return impl_->output_window != nullptr && impl_->native_fences;
+    return impl_->output_window != nullptr && !impl_->cpu_upload && impl_->native_fences;
 }
 
 size_t EglFrameCopier::registered_buffer_count() const {

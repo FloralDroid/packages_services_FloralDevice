@@ -64,10 +64,17 @@ FloralDevice and Floral HWC share the same logical display properties:
 | `ro.boot.floral_height` | `1080` | `320`-`4320` | HWC and video session geometry. |
 | `ro.boot.floral_fps` | `60` | `1`-`60` | HWC refresh selection and encoder frame rate. |
 | `ro.boot.floral_dpi` | `320` | `72`-`640` | HWC density only. |
+| `ro.boot.floral_allow_secure_capture` | `0` | `0` or `1` | Allow shell-owned virtual displays to show secure, non-DRM layers. |
 
 Invalid values fall back to deterministic defaults. Portrait logical displays
 may use transposed coded dimensions and an explicit rotation in the FSV2
 header; Android input remains in logical-display coordinates.
+
+Secure capture is disabled by default. Passing
+`androidboot.floral_allow_secure_capture=1` promotes virtual displays created by
+the shell UID, including the display used by scrcpy on Android 12, to secure
+displays. It does not grant this capability to applications and does not enable
+protected-buffer composition on those recording displays.
 
 ### Video backend
 
@@ -99,11 +106,13 @@ a host process can reconnect without hotplug churn.
 expiry removes external displays but never changes the permanent primary.
 
 Socket backpressure never blocks SurfaceFlinger. Software submission remains
-synchronous only until EGL has queued the source read and produced its release
-fence. VA-API currently waits for VPP completion before returning source-buffer
-ownership. The GLES rotation fallback also waits for its intermediate render
-before VPP because VA does not accept the Android native fence directly. Codec
-output dequeueing remains non-blocking.
+synchronous only until the source is safe to reuse. The software gralloc path
+maps its shared-memory client target and uploads it to a persistent GLES
+texture; other gralloc backends keep the EGLImage import path. VA-API currently
+waits for VPP completion before returning source-buffer ownership. The GLES
+rotation fallback also waits for its intermediate render before VPP because VA
+does not accept the Android native fence directly. Codec output dequeueing
+remains non-blocking.
 
 FDO1 touch control supports the permanent primary and hotplug external displays.
 Encoded video currently consumes the permanent primary display only.
@@ -161,9 +170,14 @@ FloralDevice 与 Floral HWC 共用同一组逻辑显示属性：
 | `ro.boot.floral_height` | `1080` | `320`-`4320` | HWC 和视频会话几何尺寸。 |
 | `ro.boot.floral_fps` | `60` | `1`-`60` | HWC 刷新率选择和编码帧率。 |
 | `ro.boot.floral_dpi` | `320` | `72`-`640` | 仅供 HWC 设置密度。 |
+| `ro.boot.floral_allow_secure_capture` | `0` | `0` 或 `1` | 允许 shell 创建的虚拟屏显示安全但非 DRM 的图层。 |
 
 非法值会回退到确定的默认值。竖屏逻辑显示可以使用宽高转置后的编码尺寸，并在
 FSV2 头中携带明确的旋转角度；Android 输入坐标始终使用逻辑显示坐标系。
+
+安全录制默认关闭。传入 `androidboot.floral_allow_secure_capture=1` 后，shell UID
+创建的虚拟屏（包括 Android 12 上 scrcpy 使用的虚拟屏）会被提升为安全显示。
+该开关不会向普通应用授予此能力，也不会让录制显示合成受保护的 DRM 缓冲区。
 
 ### 视频后端
 
@@ -192,9 +206,10 @@ Docker 只需要把宿主传输目录 bind mount 到 `/ipc/floral_stream`。Andr
 `ro.boot.floral_control_disconnect_lease_ms` 可修改该有界租约。租约到期会
 移除外屏，但永远不会修改永久主屏。
 
-Socket 背压不会阻塞 SurfaceFlinger。软件提交仅同步到 EGL 已排入源图像读取并
-生成 release fence 为止。VA-API 当前会等待 VPP 完成后再归还源缓冲区所有权。
-由于 VA 不能直接接收 Android 原生 fence，GLES 旋转回退也会等待中间渲染完成
-后再进入 VPP。编码器输出 dequeue 始终保持非阻塞。
+Socket 背压不会阻塞 SurfaceFlinger。软件提交仅同步到源缓冲区可安全复用为止。
+software gralloc 路径会映射共享内存 client target，并上传到持久 GLES 纹理；
+其他 gralloc 后端仍使用 EGLImage 导入。VA-API 当前会等待 VPP 完成后再归还源
+缓冲区所有权。由于 VA 不能直接接收 Android 原生 fence，GLES 旋转回退也会等待
+中间渲染完成后再进入 VPP。编码器输出 dequeue 始终保持非阻塞。
 
 FDO1 触摸控制支持永久主屏和动态外屏；编码视频目前仍只消费永久主屏。
