@@ -34,7 +34,8 @@ struct VideoFrameConsumerBackendConfig {
     floral::stream::session::VideoStreamSessionConfig session_config;
     floral::stream::transport::HostVideoSinkConfig sink_config;
     std::chrono::milliseconds reconnect_interval{1'000};
-    size_t max_output_packets_per_frame = 32;
+    std::chrono::milliseconds output_drain_retry_interval{2};
+    size_t max_output_packets_per_drain = 32;
 };
 
 // Creates a reconnecting single-display backend. The returned object also

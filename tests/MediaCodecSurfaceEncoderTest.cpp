@@ -16,10 +16,12 @@
 
 #include "EglSurfaceRenderer.h"
 #include "floral/device/display/HardwareBufferImporter.h"
+#include "floral/device/service/VideoFrameConsumerBackend.h"
 #include "floral/stream/codec/EncoderSession.h"
 #include "floral/stream/codec/MediaCodecSurfaceEncoder.h"
 #include "floral/stream/session/VideoStreamSession.h"
 #include "floral/stream/transport/HostVideoSink.h"
+#include "floral/stream/transport/VideoPacketProtocol.h"
 
 #include <android-base/unique_fd.h>
 #include <android/hardware_buffer.h>
@@ -28,12 +30,18 @@
 #include <aidl/android/hardware/graphics/common/PixelFormat.h>
 #include <aidlcommonsupport/NativeHandle.h>
 #include <gtest/gtest.h>
+#include <poll.h>
 #include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 #include <vndk/hardware_buffer.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <future>
 #include <iostream>
@@ -200,6 +208,85 @@ bool FillHardwareBuffer(AHardwareBuffer* buffer, android::base::unique_fd releas
         return false;
     }
     outAcquireFence->reset(acquireFence);
+    return true;
+}
+
+android::base::unique_fd ConnectUnixSocket(const std::string& path, std::string* error) {
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (path.size() >= sizeof(address.sun_path)) {
+        if (error != nullptr) {
+            *error = "test Unix socket path is too long";
+        }
+        return {};
+    }
+    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+    android::base::unique_fd socketFd(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+    if (!socketFd.ok() ||
+        connect(socketFd.get(), reinterpret_cast<const sockaddr*>(&address), sizeof(address)) !=
+                0) {
+        if (error != nullptr) {
+            *error = std::string("connecting test Unix socket failed: ") + std::strerror(errno);
+        }
+        return {};
+    }
+    return socketFd;
+}
+
+bool ReceiveAllWithTimeout(int socketFd, uint8_t* data, size_t size,
+                           std::chrono::milliseconds timeout) {
+    const auto deadline = Clock::now() + timeout;
+    size_t offset = 0;
+    while (offset < size) {
+        const auto remaining =
+                std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now());
+        if (remaining <= std::chrono::milliseconds::zero()) {
+            return false;
+        }
+        pollfd descriptor{};
+        descriptor.fd = socketFd;
+        descriptor.events = POLLIN;
+        int pollResult = 0;
+        do {
+            pollResult = poll(&descriptor, 1, static_cast<int>(remaining.count()));
+        } while (pollResult < 0 && errno == EINTR);
+        if (pollResult <= 0) {
+            return false;
+        }
+        const ssize_t received = recv(socketFd, data + offset, size - offset, 0);
+        if (received > 0) {
+            offset += static_cast<size_t>(received);
+            continue;
+        }
+        if (received < 0 && errno == EINTR) {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+bool ReceiveVideoPacket(int socketFd, transport::VideoPacketHeader* header,
+                        std::vector<uint8_t>* payload, std::string* error) {
+    transport::SerializedVideoPacketHeader serialized{};
+    if (!ReceiveAllWithTimeout(socketFd, serialized.data(), serialized.size(),
+                               std::chrono::seconds(10))) {
+        if (error != nullptr) {
+            *error = "timed out waiting for an FSV2 header";
+        }
+        return false;
+    }
+    if (!transport::ParseVideoPacketHeader(serialized, header, error)) {
+        return false;
+    }
+    payload->resize(header->payload_size);
+    if (!ReceiveAllWithTimeout(socketFd, payload->data(), payload->size(),
+                               std::chrono::seconds(10))) {
+        if (error != nullptr) {
+            *error = "timed out waiting for an FSV2 payload";
+        }
+        return false;
+    }
     return true;
 }
 
@@ -631,6 +718,90 @@ TEST(VideoStreamSessionTest, SendsEncodedFramesWithMatchedSubmissionTimestamps) 
     ASSERT_NE(finalPixels, nullptr);
     ASSERT_EQ(AHardwareBuffer_unlock(buffer.get(), nullptr), 0);
     stream->UnregisterBuffer(bufferId);
+}
+
+TEST(VideoFrameConsumerBackendTest, DrainsAsynchronousOutputAfterDisplayBecomesStatic) {
+    ::floral::device::service::VideoFrameConsumerBackendConfig config;
+    config.display_id = 1;
+    config.video_socket_path = "/data/local/tmp/floral-video-backend-test-" +
+                               std::to_string(getpid()) + ".sock";
+    config.reconnect_interval = std::chrono::milliseconds(1);
+    config.output_drain_retry_interval = std::chrono::milliseconds(1);
+    config.session_config.stream_id = 1;
+    config.session_config.encoder.width = 320;
+    config.session_config.encoder.height = 320;
+    config.session_config.encoder.bitrate_bps = 1'000'000;
+    config.session_config.encoder.frame_rate = 30;
+    config.session_config.geometry = MakeLandscapeCodedGeometry(320, 320);
+
+    std::shared_ptr<::floral::device::display::FrameConsumerBackend> backend =
+            ::floral::device::service::CreateVideoFrameConsumerBackend(config);
+    ASSERT_NE(backend, nullptr);
+
+    std::string error;
+    android::base::unique_fd receiver = ConnectUnixSocket(config.video_socket_path, &error);
+    ASSERT_TRUE(receiver.ok()) << error;
+    const ::floral::device::display::DisplayConsumerStreamState state =
+            backend->GetStreamState(config.display_id);
+    ASSERT_TRUE(state.accepting_frames);
+    ASSERT_NE(state.generation, 0u);
+
+    AHardwareBuffer_Desc description{};
+    description.width = config.session_config.geometry.logical_width;
+    description.height = config.session_config.geometry.logical_height;
+    description.layers = 1;
+    description.format = AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
+    description.usage =
+            AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN | AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
+    AHardwareBuffer* rawBuffer = nullptr;
+    ASSERT_EQ(AHardwareBuffer_allocate(&description, &rawBuffer), 0);
+    HardwareBufferPtr sourceBuffer(rawBuffer, AHardwareBuffer_release);
+
+    ::floral::device::display::UniqueHardwareBuffer importedBuffer;
+    {
+        aidl::android::hardware::graphics::common::HardwareBuffer transported =
+                ToTransportedBuffer(sourceBuffer.get());
+        importedBuffer = ::floral::device::display::ImportHardwareBuffer(transported, &error);
+        ASSERT_NE(importedBuffer, nullptr) << error;
+    }
+    ::floral::device::display::ImportedBufferRegistration registration;
+    registration.display_id = config.display_id;
+    registration.generation = state.generation;
+    registration.buffer_id = 1;
+    registration.buffer = std::move(importedBuffer);
+    ASSERT_EQ(backend->RegisterBuffer(std::move(registration)),
+              aidl::floral::device::display::FrameStatus::ACCEPTED);
+
+    android::base::unique_fd acquireFence;
+    ASSERT_TRUE(FillHardwareBuffer(sourceBuffer.get(), {}, 1, &acquireFence, &error)) << error;
+    ::floral::device::display::ImportedFrameRequest frame;
+    frame.display_id = config.display_id;
+    frame.generation = state.generation;
+    frame.buffer_id = 1;
+    frame.source_sequence = 1;
+    frame.frame_submit_time_nanos = 1;
+    frame.presentation_time_nanos = 33'333'333;
+    frame.acquire_fence = std::move(acquireFence);
+    const ::floral::device::display::ImportedFrameResult submitted =
+            backend->SubmitFrame(std::move(frame));
+    ASSERT_EQ(submitted.status, aidl::floral::device::display::FrameStatus::ACCEPTED);
+
+    bool receivedConfig = false;
+    bool receivedKeyFrame = false;
+    for (size_t packet = 0; packet < 4 && !receivedKeyFrame; ++packet) {
+        transport::VideoPacketHeader header;
+        std::vector<uint8_t> payload;
+        ASSERT_TRUE(ReceiveVideoPacket(receiver.get(), &header, &payload, &error)) << error;
+        EXPECT_EQ(header.stream_id, config.session_config.stream_id);
+        EXPECT_EQ(header.generation, state.generation);
+        EXPECT_FALSE(payload.empty());
+        receivedConfig = receivedConfig ||
+                         (header.flags & transport::kVideoPacketCodecConfig) != 0;
+        receivedKeyFrame = receivedKeyFrame ||
+                           (header.flags & transport::kVideoPacketKeyFrame) != 0;
+    }
+    EXPECT_TRUE(receivedConfig);
+    EXPECT_TRUE(receivedKeyFrame);
 }
 
 }  // namespace

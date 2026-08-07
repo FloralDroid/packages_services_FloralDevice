@@ -636,13 +636,16 @@ cc_test {
     static_libs: [
         "libaidlcommonsupport",
         "libfloral_device_display_ingress",
+        "libfloral_device_runtime",
         "libfloral_stream_codec",
         "libfloral_stream_session",
         "libfloral_stream_transport",
+        "libfloral_unix_socket_server",
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
         "android.hardware.graphics.common-V2-ndk_platform",
+        "floral.device.display-V1-ndk_platform",
         "libbase",
         "libcutils",
         "libEGL",

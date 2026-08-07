@@ -25,10 +25,12 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <limits>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -94,7 +96,20 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
         : config_(std::move(config)),
           desired_session_config_(config_.session_config),
           socket_server_(std::move(socketServer)),
-          next_reconnect_(std::chrono::steady_clock::now()) {}
+          next_reconnect_(std::chrono::steady_clock::now()) {
+        output_worker_ = std::thread(&VideoFrameConsumerBackend::DrainOutputLoop, this);
+    }
+
+    ~VideoFrameConsumerBackend() override {
+        {
+            std::lock_guard lock(mutex_);
+            output_worker_stopping_ = true;
+        }
+        output_condition_.notify_all();
+        if (output_worker_.joinable()) {
+            output_worker_.join();
+        }
+    }
 
     display::DisplayConsumerStreamState GetStreamState(uint64_t displayId) override {
         std::lock_guard lock(mutex_);
@@ -157,7 +172,6 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
                 return result;
             }
             result.status = AidlFrameStatus::ACCEPTED;
-            DrainOutputLocked();
             return result;
         }
         const uint64_t frameSubmitTimeNanos =
@@ -176,7 +190,8 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
 
         result.status = AidlFrameStatus::ACCEPTED;
         result.release_fence = std::move(copied.release_fence);
-        DrainOutputLocked();
+        ++pending_output_frames_;
+        output_condition_.notify_one();
         return result;
     }
 
@@ -367,8 +382,10 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
         generation_ = candidateGeneration;
         session_ = std::move(session);
         buffers_.clear();
+        pending_output_frames_ = 0;
         next_frame_presentation_time_nanos_ = 0;
         last_connection_error_.clear();
+        output_condition_.notify_one();
         const stream::VideoGeometry& geometry = sessionConfig.geometry;
         LOG(INFO) << "video stream generation " << generation_ << " active: logical "
                   << geometry.logical_width << "x" << geometry.logical_height << ", coded "
@@ -377,17 +394,53 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
                   << session_->encoder_config().frame_rate << " via " << session_->codec_name();
     }
 
-    void DrainOutputLocked() {
-        const size_t packetLimit = std::max<size_t>(config_.max_output_packets_per_frame, 1);
+    bool DrainOutputLocked() {
+        const session::VideoOutputStats& initialStats = session_->output_stats();
+        const uint64_t initialCompletedFrames =
+                initialStats.matched_frame_timestamps + initialStats.unmatched_frame_timestamps;
+        bool madeProgress = false;
+        const size_t packetLimit = std::max<size_t>(config_.max_output_packets_per_drain, 1);
         for (size_t packet = 0; packet < packetLimit; ++packet) {
             std::string error;
             const session::VideoStreamDrainResult drain = session_->DrainOutput(0, &error);
             if (!drain.success) {
                 MarkSessionForResetLocked(error);
+                return madeProgress;
+            }
+            madeProgress = madeProgress || drain.made_progress;
+            if (!drain.made_progress || drain.end_of_stream) {
+                break;
+            }
+        }
+        const session::VideoOutputStats& currentStats = session_->output_stats();
+        const uint64_t currentCompletedFrames =
+                currentStats.matched_frame_timestamps + currentStats.unmatched_frame_timestamps;
+        const uint64_t completedFrames = currentCompletedFrames - initialCompletedFrames;
+        pending_output_frames_ = completedFrames >= pending_output_frames_
+                                         ? 0
+                                         : pending_output_frames_ - completedFrames;
+        return madeProgress;
+    }
+
+    void DrainOutputLoop() {
+        std::unique_lock lock(mutex_);
+        while (!output_worker_stopping_) {
+            output_condition_.wait(lock, [this]() {
+                return output_worker_stopping_ ||
+                       (session_ != nullptr && !reset_required_ && pending_output_frames_ > 0);
+            });
+            if (output_worker_stopping_) {
                 return;
             }
-            if (!drain.made_progress || drain.end_of_stream) {
-                return;
+            if (!session_->transport_connected()) {
+                MarkSessionForResetLocked("host video socket disconnected");
+                continue;
+            }
+
+            const bool madeProgress = DrainOutputLocked();
+            if (session_ != nullptr && !reset_required_ && pending_output_frames_ > 0 &&
+                !madeProgress) {
+                output_condition_.wait_for(lock, config_.output_drain_retry_interval);
             }
         }
     }
@@ -397,6 +450,8 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
             return;
         }
         reset_required_ = true;
+        pending_output_frames_ = 0;
+        output_condition_.notify_one();
         LOG(WARNING) << "video stream generation " << generation_ << " became inactive: " << error;
     }
 
@@ -457,7 +512,15 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
     std::unordered_map<uint64_t, uint64_t> buffers_;
     uint32_t generation_ = 0;
     bool reset_required_ = false;
+    uint64_t pending_output_frames_ = 0;
     uint64_t next_frame_presentation_time_nanos_ = 0;
+
+    // MediaCodec output becomes available asynchronously after SubmitFrame.
+    // Keep draining while submitted frames are outstanding, including when the
+    // display stops producing new frames because its contents are static.
+    std::condition_variable output_condition_;
+    bool output_worker_stopping_ = false;
+    std::thread output_worker_;
 
     // Reconnect pacing keeps the HWC state poll from producing a tight loop.
     std::chrono::steady_clock::time_point next_reconnect_;
@@ -473,7 +536,8 @@ std::shared_ptr<display::FrameConsumerBackend> CreateVideoFrameConsumerBackend(
         encoderControl->reset();
     }
     if (config.video_socket_path.empty() ||
-        config.reconnect_interval <= std::chrono::milliseconds::zero()) {
+        config.reconnect_interval <= std::chrono::milliseconds::zero() ||
+        config.output_drain_retry_interval <= std::chrono::milliseconds::zero()) {
         LOG(ERROR) << "video frame consumer backend configuration is invalid";
         return nullptr;
     }
