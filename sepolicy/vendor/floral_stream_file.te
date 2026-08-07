@@ -5,6 +5,10 @@ type floral_stream_file, file_type;
 # vendor directory type, preserving the Treble socket boundary.
 type floral_input_socket_file, file_type, coredomain_socket;
 
+# init reads the optional identity profile before product properties are fixed.
+allow init floral_stream_file:dir search;
+allow init floral_stream_file:file r_file_perms;
+
 allow { platform_app priv_app } floral_stream_file:dir rw_dir_perms;
 type_transition platform_app floral_stream_file:sock_file floral_input_socket_file "operate.sock";
 type_transition priv_app floral_stream_file:sock_file floral_input_socket_file "operate.sock";

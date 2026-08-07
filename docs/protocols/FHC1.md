@@ -459,7 +459,7 @@ autonomous behavior, profile persistence, internal entropy, and runtime leases.
 
 Command ids `0x0800` through `0x0813` control and inspect the multi-AP Wi-Fi
 model. Actual packets continue to use Android's existing Ethernet network. A
-valid `/mnt/vendor/floral_stream/wifi.json` supplies the boot profile and private
+valid `/ipc/floral_stream/wifi.json` supplies the boot profile and private
 credentials. Missing or invalid JSON leaves simulation disabled with no APs.
 Runtime mutations use bounded leases; explicit release or expiry restores the
 mounted profile. Android Settings may toggle, connect, disconnect, or switch APs
