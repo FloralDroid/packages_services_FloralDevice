@@ -1,101 +1,4 @@
-# Floral Device Host Protocols / Floral Device 宿主协议
-
-The video channel is a Unix `SOCK_STREAM`. The container listens at
-`/ipc/floral_stream/video.sock` by default and the host connects to it. Docker
-should bind the host transport directory to `/ipc/floral_stream`.
-Every H.264 access unit starts with a fixed 80-byte header followed by exactly
-`payload_size` bytes. Integer fields use network byte order. C or C++ structure
-layout is not part of the protocol.
-
-| Offset | Size | Field |
-| ---: | ---: | --- |
-| 0 | 4 | Magic `FSV2` |
-| 4 | 2 | Protocol version, currently `2` |
-| 6 | 2 | Header size, currently `80` |
-| 8 | 4 | Stream id |
-| 12 | 4 | Stream generation |
-| 16 | 8 | Packet sequence |
-| 24 | 8 | Presentation timestamp in microseconds |
-| 32 | 4 | Packet flags |
-| 36 | 4 | Codec id, `1` for H.264 |
-| 40 | 4 | Coded width passed to the video encoder |
-| 44 | 4 | Coded height passed to the video encoder |
-| 48 | 4 | Android logical display width |
-| 52 | 4 | Android logical display height |
-| 56 | 4 | Payload size |
-| 60 | 4 | Clockwise display rotation in degrees: `0`, `90`, `180`, or `270` |
-| 64 | 8 | Frame submission `CLOCK_MONOTONIC` timestamp in nanoseconds, or zero |
-| 72 | 8 | Reserved, must be zero |
-
-The receiver applies `display_rotation` clockwise to decoded coded pixels to
-recover the Android logical display orientation. For example, a logical
-`720x1280` display is sent as a coded `1280x720` stream with rotation `90`.
-The container performs the inverse counter-clockwise rotation while drawing the
-final display buffer into the MediaCodec input surface. That rotation is fused
-into the existing EGL draw and does not add another full-frame copy.
-
-Logical dimensions remain the coordinate space for Android input. Coded
-dimensions only describe the decoder output and must not be used directly for
-touch coordinates. A `90` or `270` degree stream has a transposed coded aspect;
-the other rotations retain the logical aspect.
-
-Packet flags identify codec configuration, key frames, end of stream, and
-discontinuities. A resolution change increments the stream generation and is
-followed by codec configuration and a key frame for the new generation.
-
-The frame submission timestamp is captured when the stream session accepts an
-input frame. The host records `CLOCK_MONOTONIC` after receiving the complete
-payload and subtracts the submission timestamp to measure submission-to-host
-latency. Codec configuration and end-of-stream packets without an input frame
-use zero. The container and host monotonic clock domains must be verified before
-these values are compared directly.
-
-`HostVideoSink` owns a bounded asynchronous queue. Queue saturation is reported
-to the caller instead of blocking the encoder thread. The session manager is
-responsible for dropping dependent frames, requesting an IDR, and marking the
-next recoverable packet as a discontinuity.
-
-## FSA1 encoded audio channel / FSA1 编码音频通道
-
-The audio channel is a separate Unix `SOCK_STREAM`. The container listens at
-`/ipc/floral_stream/audio.sock` by default and the host connects to it.
-Every Opus packet starts with a fixed 64-byte header followed by exactly
-`payload_size` bytes. Integer fields use network byte order. One packet
-represents 240 stereo samples per channel at 48 kHz, or 5 milliseconds. C or
-C++ structure layout is not part of the protocol.
-
-| Offset | Size | Field |
-| ---: | ---: | --- |
-| 0 | 4 | Magic `FSA1` |
-| 4 | 2 | Protocol version, currently `1` |
-| 6 | 2 | Header size, currently `64` |
-| 8 | 4 | Stream id |
-| 12 | 4 | Stream generation |
-| 16 | 8 | Packet sequence within the generation |
-| 24 | 8 | First sample `CLOCK_MONOTONIC` presentation time in nanoseconds |
-| 32 | 4 | Sample rate, currently `48000` |
-| 36 | 2 | Channel count, currently `2` |
-| 38 | 2 | Codec id, `1` for Opus; `2` is reserved for diagnostic PCM S16_LE |
-| 40 | 4 | PCM frame count represented by this packet, currently `240` |
-| 44 | 4 | Encoded payload size, at most `1275` bytes |
-| 48 | 4 | Packet flags |
-| 52 | 4 | Reserved, must be zero |
-| 56 | 8 | First frame position since the HAL output opened |
-
-Flag bit 0 marks the first delivered packet of a generation. Bit 1 marks a
-discontinuity caused by stream start, FMQ or socket queue overflow, service
-reconnection, or an input gap. Bit 2 is reserved for an explicit stream-end
-packet. A bitrate-only update does not change the generation and requires no
-decoder reconfiguration. The receiver uses sequence gaps with Opus PLC or a
-short silence interval; it must not accumulate old packets to repair latency.
-
-音频使用独立 Unix `SOCK_STREAM`。每个 Opus 包由固定 64 字节大端协议头和紧随其后
-的 `payload_size` 字节负载组成。每包表示 48 kHz 双声道每声道 240 个采样，即
-5 毫秒。bit 0 表示 generation 首包，bit 1 表示输入、FMQ、宿主队列或重连造成的
-不连续，bit 2 保留给显式流结束。仅修改码率不会改变 generation，也不要求解码器
-重新配置；接收端应使用 Opus PLC 或短静音处理序列缺口，不能补发旧包并累积延迟。
-
-## FHC1 HAL/device control channel / HAL 设备控制面
+# FHC1 HAL/device control channel
 
 The control channel is a bidirectional Unix `SOCK_STREAM`. The container listens
 at `/ipc/floral_stream/control.sock` by default and the host connects to
@@ -181,11 +84,6 @@ id at offsets 0, 4, 8, 12, and 16. Results are `0` applied, `1` invalid
 configuration, `2` unsupported, and `3` unknown stream. Applying bitrate uses
 `OPUS_SET_BITRATE`; it does not recreate the encoder or increment generation.
 
-命令 `0x0200` 动态调整一个 Opus 音频流。16 字节请求依次包含 stream id、字段
-掩码、码率和零保留字段；当前只允许掩码 bit 0，码率范围为 16000 至 512000 bit/s。
-20 字节响应依次返回结果、支持字段、当前 generation、实际码率和 codec id。实现
-通过 `OPUS_SET_BITRATE` 原位生效，不重建编码器，也不递增 generation。
-
 Command id `0x0300` updates one active video encoder. Its fixed 48-byte request
 payload is:
 
@@ -232,7 +130,7 @@ invalidates registered source buffers, and starts with new codec configuration
 and a key frame. Lower frame rates are also enforced at frame ingress so the
 encoder does not continue receiving every compositor frame.
 
-### Sensor and GNSS simulation commands
+## Sensor and GNSS simulation commands
 
 Command ids `0x0400` through `0x0406` control and inspect ordinary phone
 sensors. Command ids `0x0500` through `0x0505` do the same for GNSS. These are
@@ -419,6 +317,218 @@ vertical accuracy, speed accuracy, and bearing accuracy floats are at offsets
 64 through 84. Each satellite record contains 16-bit record size and used-in-fix
 flag, 32-bit SVID and constellation, then C/N0, elevation, and azimuth floats.
 
+## Power simulation commands
+
+Command ids `0x0600` through `0x0603` control and inspect the coherent battery
+and thermal model. They are FHC1 operations and do not add an FDO1 operation.
+When no power command has ever been received, the device autonomously
+discharges, connects a virtual charger near a randomized low threshold, and
+disconnects it near a randomized high threshold. Noise, temperature inertia,
+and cycle thresholds are generated inside Android.
+
+| Command | Name | Request payload | Response payload |
+| ---: | --- | --- | --- |
+| `0x0600` | SetPowerControl | 24-byte manual control | 16-byte update |
+| `0x0601` | ReleasePowerControl | Empty | 16-byte update |
+| `0x0602` | GetPowerSnapshot | Empty | 96-byte snapshot |
+| `0x0603` | GetPowerCapabilities | Empty | 24-byte capabilities |
+
+The `0x0600` request contains version `1` and size `24` at offsets 0 and 2,
+followed by a 32-bit mode, nonnegative current magnitude in microamperes, and lease
+duration in milliseconds at offsets 4, 8, and 12. The final eight bytes are
+reserved and zero. Modes are `1` charge, `2` discharge, and `3` idle. A zero
+current selects the model default; idle requires zero current. The lease is
+between 1 and 60000 ms. Idle stops state-of-charge movement immediately while
+internal temperature and voltage processes continue. Explicit release, lease
+expiry, or the FHC1 authority lease expiry resumes autonomous cycling from the
+current state without a level jump.
+
+Update responses contain version and size at offsets 0 and 2, a result at 4,
+and generation at 8. Results are `0` applied, `1` unchanged, and `2` invalid.
+
+The `0x0602` snapshot begins with version, size, and flags at offsets 0, 2, and
+4. Flag bits 0 and 1 mean externally controlled and charger online. Generation,
+guest boot timestamp, control mode, battery status, level, voltage, current,
+average current, charge counter, and full charge are at offsets 8 through 52.
+Time to full is at 56. Battery, skin, CPU, and GPU temperatures occupy offsets
+64 through 76; skin, CPU, GPU, and battery throttling severities are at 80, 84,
+88, and 92. Battery statuses are `0` unknown, `1` charging,
+`2` discharging, `3` not charging, and `4` full.
+
+The `0x0603` response contains version and size, a zero reserved word, a 64-bit
+mode mask at offset 8, maximum lease at 16, and capability flags at 20. Mode
+mask bits 0 through 2 mean charge, discharge, and idle. Capability bits 0
+through 2 mean autonomous default, internal entropy, and persisted state.
+
+## Radio simulation commands
+
+Command ids `0x0700` through `0x0715` control and inspect cellular registration,
+signal, cells, SIM state, calls, and SMS events. A bounded external-control lease
+applies to registration, signal, cell, and SIM mutations. Explicit release,
+lease expiry, or FHC1 authority expiry restores the autonomous radio state.
+
+| Command | Name | Request payload | Response payload |
+| ---: | --- | --- | --- |
+| `0x0700` | SetRadioRegistration | 24-byte registration request | 24-byte update |
+| `0x0701` | SetRadioSignal | 32-byte signal request | 24-byte update |
+| `0x0702` | ReplaceRadioCells | 16-byte header plus cell records | 24-byte update |
+| `0x0703` | SetSimState | 16-byte SIM request | 24-byte update |
+| `0x0704` | InjectIncomingCall | 12-byte header plus number | 24-byte update |
+| `0x0705` | SetRadioCallState | 24-byte call request | 24-byte update |
+| `0x0706` | InjectIncomingSms | 16-byte header plus address and body | 24-byte update |
+| `0x0707` | ReleaseRadioControl | Empty | 24-byte update |
+| `0x0708` | PushRadioSampleBatch | Reserved; currently unsupported | Generic error |
+| `0x0710` | GetRadioProfile | Empty | 48-byte header plus strings |
+| `0x0711` | GetRadioSnapshot | Empty | 80-byte snapshot |
+| `0x0712` | ListRadioCells | Empty | 16-byte header plus cell records |
+| `0x0713` | ListRadioCalls | Empty | 16-byte header plus call records |
+| `0x0714` | ListRadioSmsEvents | Empty | 16-byte header plus SMS records |
+| `0x0715` | GetRadioCapabilities | Empty | 32-byte capabilities |
+
+Every nonempty top-level Radio request or response begins with 16-bit version
+`1` and a 16-bit total payload size. Leases range from 1 through 60000 ms.
+Registration states are `0` not registered, `1` home, `2` searching, `3`
+denied, `4` unknown, and `5` roaming. Technologies are `0` unknown, `1` GSM,
+`2` WCDMA, and `3` LTE. SIM states are `0` absent, `1` ready, `2` PIN
+required, and `3` PUK required. Call states are `0` active, `1` holding, `2`
+dialing, `3` alerting, `4` incoming, and `5` waiting.
+
+The `0x0700` request stores voice registration, data registration, technology,
+lease duration, and a zero reserved word at offsets 4, 8, 12, 16, and 20. The
+`0x0701` request stores RSSI dBm, RSRP dBm, RSRQ dB, RSSNR in tenths of a dB,
+CQI, timing advance, and lease duration at offsets 4 through 28 in four-byte
+steps. Valid ranges are `-120..-20`, `-140..-40`, `-30..0`, `-200..300`,
+`0..15`, and `0..1282` respectively.
+
+The `0x0702` request header stores cell count at offset 4, lease duration at 8,
+and a zero reserved word at 12. It accepts 1 through 32 fixed 60-byte cell
+records and requires exactly one serving cell:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 8 | Nonzero cell identity |
+| 8 | 4 | Registered flag, `0` or `1` |
+| 12 | 4 | Tracking area code, `0` through `65535` |
+| 16 | 8 | E-UTRAN cell identity, `0` through `268435455` |
+| 24 | 4 | Physical cell id, `0` through `503` |
+| 28 | 4 | EARFCN, `0` through `262143` |
+| 32 | 4 | Bandwidth in kHz, `1400` through `20000` |
+| 36 | 24 | Signal fields in the same order as `0x0701` |
+
+The `0x0703` request stores SIM state, lease duration, and a zero reserved word
+at offsets 4, 8, and 12. The `0x0704` request stores phone-number byte length at
+offset 4, a zero reserved word at 8, and 1 through 20 ASCII bytes at offset 12.
+A number contains decimal digits with an optional leading `+`. The `0x0705`
+request reserves offset 4, stores a positive signed-64-bit call id at 8, stores
+call state at 16, and reserves offset 20. The `0x0706` request stores address
+length, message-body length, and a zero reserved word at offsets 4, 8, and 12,
+followed by the address and body without terminators. The address follows the
+same phone-number rules; the UTF-8 body is 1 through 1024 bytes.
+
+Every 24-byte update response stores result at offset 4, generation at 8, and
+an affected call id or SMS sequence at 16. Result values are `0` applied, `1`
+unchanged on release, and `2` rejected. Query responses never acquire or renew
+the Radio-specific external-control lease.
+
+The `0x0710` profile response stores profile version at offset 4 and ten string
+lengths at offsets 8 through 44. The corresponding bytes follow the 48-byte
+header in this order: operator long name, operator short name, MCC, MNC, IMEI,
+IMEISV, IMSI, ICCID, MSISDN, and baseband version. Strings have no terminators.
+
+The `0x0711` snapshot stores flags, generation, guest boot timestamp, SIM state,
+voice registration, data registration, technology, signal, and the cell, call,
+and SMS counts at offsets 4, 8, 16, 24, 28, 32, 36, 40, 64, 68, and 72.
+Flag bits 0 and 1 mean externally controlled and radio on. Offset 76 is
+reserved. The cell-list response repeats the 60-byte cell record after a
+16-byte header containing count at offset 4.
+
+Each call-list record contains record size and state at offsets 0 and 4, call id
+at 8, flags at 16, number length at 20, and the number at 24. Flag bits 0 and 1
+mean incoming and multiparty. Each SMS-list record contains record size and an
+incoming flag at offsets 0 and 4, sequence and realtime timestamp in nanoseconds
+at 8 and 16, address and body lengths at 24 and 28, then the two strings at 32.
+The list header reports the records actually returned; the SMS query keeps the
+newest events when the FHC1 payload limit prevents returning the full history.
+
+The `0x0715` capabilities response stores flags `0x0f`, maximum cells `32`,
+maximum calls `8`, maximum SMS events `64`, maximum lease `60000`, and
+technology mask `0x0e` at offsets 4, 8, 12, 16, 20, and 24. The flags mean
+autonomous behavior, profile persistence, internal entropy, and runtime leases.
+
+## Wi-Fi simulation commands
+
+Command ids `0x0800` through `0x0813` control and inspect the multi-AP Wi-Fi
+model. Actual packets continue to use Android's existing Ethernet network. A
+valid `/mnt/vendor/floral_stream/wifi.json` supplies the boot profile and private
+credentials. Missing or invalid JSON leaves simulation disabled with no APs.
+Runtime mutations use bounded leases; explicit release or expiry restores the
+mounted profile. Android Settings may toggle, connect, disconnect, or switch APs
+only while no host lease is active.
+
+| Command | Name | Request payload | Response payload |
+| ---: | --- | --- | --- |
+| `0x0800` | SetWifiEnabled | 16-byte enabled request | 24-byte update |
+| `0x0801` | ReplaceWifiAccessPoints | 16-byte header plus AP records | 24-byte update |
+| `0x0802` | SetWifiConnection | 16-byte connection request | 24-byte update |
+| `0x0803` | SetWifiLink | 32-byte link request | 24-byte update |
+| `0x0804` | ReleaseWifiControl | Empty | 24-byte update |
+| `0x0805` | PushWifiSampleBatch | 16-byte header plus sample records | 24-byte update |
+| `0x0810` | GetWifiProfile | Empty | 48-byte profile |
+| `0x0811` | GetWifiSnapshot | Empty | 96-byte snapshot |
+| `0x0812` | ListWifiAccessPoints | Empty | 16-byte header plus AP records |
+| `0x0813` | GetWifiCapabilities | Empty | 32-byte capabilities |
+
+Every nonempty top-level Wi-Fi request or response starts with 16-bit version
+`1` and a 16-bit structure or payload size. Security values are `0` open, `1`
+WPA2-PSK, and `2` WPA3-SAE. Leases range from 1 through 60000 ms. Update
+responses contain result at offset 4, generation at 8, and the affected AP id at
+16. Results are `0` applied, `1` unchanged or lease refreshed, and `2` invalid.
+
+The `0x0800` request stores enabled at offset 4, lease at 8, and a zero reserved
+word at 12. The `0x0802` request stores the 64-bit AP id at offset 4 and lease at
+12; AP id zero disconnects. The `0x0803` request stores AP id, RSSI dBm,
+frequency MHz, channel width MHz, link speed Mbps, and lease at offsets 4, 12,
+16, 20, 24, and 28.
+
+The `0x0801` header stores count, lease, and a zero reserved word at offsets 4,
+8, and 12. It accepts at most 64 fixed 72-byte AP records:
+
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 8 | Nonzero AP id, at most signed 64-bit maximum |
+| 8 | 2 | SSID byte length, 1 through 32 |
+| 10 | 2 | Security |
+| 12 | 6 | BSSID |
+| 18 | 2 | Reserved, zero |
+| 20 | 4 | RSSI in dBm, `-127` through `-1` |
+| 24 | 4 | Frequency in MHz |
+| 28 | 4 | Channel width in MHz: `20`, `40`, `80`, or `160` |
+| 32 | 4 | Link speed in Mbps, `1` through `10000` |
+| 36 | 32 | UTF-8 SSID storage, unused bytes zero |
+| 68 | 4 | Reserved, zero |
+
+The `0x0805` header uses the same count, lease, and reserved offsets. It accepts
+1 through 256 fixed 32-byte records. Each record stores a positive, strictly
+increasing guest boot timestamp at 0, AP id at 8, RSSI at 16, frequency at 20,
+link speed at 24, and a zero reserved word at 28.
+
+The profile response stores profile version, enabled, two-byte country code,
+station MAC, connected AP id, AP count, and capability mask at offsets 4, 8,
+12, 16, 24, 32, and 36. The capability mask is `0x3f`: multiple APs, internal
+entropy, mounted profile, control leases, sample batches, and Ethernet-backed
+presentation.
+
+The snapshot response stores flags, generation, guest boot timestamp, connected
+AP id, security, RSSI, frequency, channel width, link speed, BSSID, SSID length,
+and a fixed 32-byte SSID area at offsets 4, 8, 16, 24, 32, 36, 40, 44, 48, 52,
+58, and 60. Flag bits 0 through 2 mean enabled, externally controlled, and
+connected. The AP-list response repeats the 72-byte AP record after its header;
+the header stores count at offset 4 and reserves offsets 8 through 15.
+
+The capabilities response stores flags `0x3f`, maximum APs `64`, maximum samples
+`256`, maximum lease `60000`, security mask `0x07`, and presentation type `1`
+(Ethernet-backed) at offsets 4, 8, 12, 16, 20, and 24.
+
 Internally, FloralDevice fans external truth out to independent HAL readers as
 fixed 112-byte `FSS1` FMQ records. The record contains magic `FSS1`, version and
 size at offsets 0, 4, and 6; generation at 8; flags at 16; reserved zero at 20;
@@ -426,139 +536,3 @@ guest boot timestamp at 24; pose fields at 32 through 68; GNSS fields at 72
 through 108. Flag bits 0, 1, and 2 mean pose present, GNSS present, and
 discontinuity. FSS1 is an internal system/vendor transport and is not sent over
 the host socket.
-
-### 中文约束摘要
-
-FHC1 使用 24 字节固定大端帧头。`command_id` 只标识命令，`route_kind` 的高
-四位固定为 `0001`，接着四位区分请求、响应、事件和错误，最低八位当前必须
-为零。这样不会把请求/响应方向和命令编号混在一个字段里，也不需要为每个
-响应消耗另一组命令号。当前实现包括完整快照拓扑命令 `0x0100`、音频编码配置
-命令 `0x0200`、视频编码配置命令 `0x0300`、传感器命令 `0x0400` 至 `0x0406`
-以及 GNSS 命令 `0x0500` 至 `0x0505`；主屏
-`displayId=0` 永久存在，控制 socket 断开后外屏默认保留三秒，租约到期只
-清空外屏。音频码率通过 `0x0200` 原位调整。视频配置通过字段掩码支持部分更新：
-只改码率时沿用当前 generation，
-帧率、编码分辨率、I 帧间隔、后端或编码格式变化时重建会话并递增 generation。
-编码分辨率不会改变 Android 逻辑显示尺寸和输入坐标。控制面不承载触摸、键盘
-或鼠标事件。宿主只提供低频配置和可选的高频真值，噪声、偏置漂移、GNSS 误差、
-卫星状态和环境缓慢变化均在 Android 内部生成；查询命令返回当前配置、目录和
-内部状态快照，不作为连续遥测通道。
-
-## FDO1 device-operation channel
-
-The operation channel is a separate bidirectional Unix `SOCK_STREAM` at
-`/ipc/floral_stream/operate.sock`. It is reserved for device actions
-such as touch, keyboard, mouse, gestures, and explicit display operations. The
-container listens and the host connects. This is separate from FHC1 so a slow
-configuration request cannot head-of-line block high-rate input. The container
-path can be overridden with `ro.boot.floral_operate_socket`.
-
-Every message starts with a fixed 24-byte big-endian header:
-
-| Offset | Size | Field |
-| ---: | ---: | --- |
-| 0 | 4 | Magic `FDO1` |
-| 4 | 2 | Protocol version, currently `1` |
-| 6 | 2 | Header size, currently `24` |
-| 8 | 2 | Operation code |
-| 10 | 2 | Route/kind word |
-| 12 | 4 | Request id |
-| 16 | 4 | Payload size, at most 65536 bytes |
-| 20 | 4 | Reserved, must be zero |
-
-The route/kind high nibble is `0x2`. Bits 11..8 are packet kind: `0` request,
-`1` response, `2` event, or `3` error response. Low route flags are currently
-zero, producing `0x2000`, `0x2100`, `0x2200`, and `0x2300`. Requests and their
-responses use the same nonzero request id. Unacknowledged high-rate events use
-request id zero; all other packet kinds require a nonzero request id.
-
-The generic error operation is `0x0000`. Its 8-byte payload contains a 32-bit
-error code, the failed 16-bit operation code, and a zero 16-bit reserved word.
-Errors are `1` unsupported message, `2` malformed message, `3` invalid request
-id, and `4` internal error.
-
-### Input target binding
-
-Operation `0x0100` binds one connection-local target slot to a stable stream.
-The 8-byte `BIND_INPUT_TARGET` request is:
-
-| Offset | Size | Field |
-| ---: | ---: | --- |
-| 0 | 1 | Target slot, range 0 through 255 |
-| 1 | 1 | Mode, currently `0` exclusive |
-| 2 | 1 | Physical display port; `0` selects the permanent primary display |
-| 3 | 1 | Reserved, must be zero |
-| 4 | 4 | Nonzero stream id |
-
-The 28-byte response is:
-
-| Offset | Size | Field |
-| ---: | ---: | --- |
-| 0 | 4 | Result |
-| 4 | 1 | Target slot |
-| 5 | 1 | Physical display port |
-| 6 | 2 | Reserved, must be zero |
-| 8 | 4 | Stream id |
-| 12 | 4 | Input epoch |
-| 16 | 4 | Logical display width |
-| 20 | 4 | Logical display height |
-| 24 | 2 | Clockwise rotation: 0, 90, 180, or 270 |
-| 26 | 2 | Reserved, must be zero |
-
-A successful response has a nonzero epoch and dimensions. The host must stop
-sending input and bind again when the epoch changes. Results are `0` applied,
-`1` unchanged, `2` invalid target, `3` target busy, `4` unknown stream, `5`
-stale epoch, `6` invalid input state, and `7` injection failed.
-
-Operation `0x0101` unbinds a target. Its 4-byte request contains the target
-slot followed by three zero bytes. Its 8-byte response contains the 32-bit
-result, target slot, and three zero bytes. Unbinding cancels every active touch
-owned by that target before removing the mapping. Socket disconnection performs
-the same cancellation for all slots immediately; it does not use the FHC1
-three-second display-topology lease.
-
-Slots are local to one FDO1 connection. Slot 1 on one connection does not name
-slot 1 on another connection. A service supporting multiple connections must
-also namespace pointer state by connection and apply exclusive target leases.
-The current FloralDroid implementation uses one reconnecting Android connection;
-the host gateway multiplexes its remote controllers into separate slots and
-performs user authorization before forwarding input. Within that connection,
-both physical displays and nonzero stream ids are leased exclusively.
-
-Operation `0x0102` is a `TARGET_INVALIDATED` event sent by Android when a bound
-display is removed or its geometry changes. Its 12-byte payload contains target
-slot and reason at offsets 0 and 1, a zero 16-bit reserved field, stream id at
-offset 4, and the invalidated input epoch at offset 8. Reasons are `1` display
-removed and `2` geometry changed. The host must stop the old event sequence and
-bind the slot again before sending more input.
-
-### Touch event
-
-Operation `0x0200` is an unacknowledged event (`route_kind=0x2200`,
-`request_id=0`) with a fixed 24-byte payload:
-
-| Offset | Size | Field |
-| ---: | ---: | --- |
-| 0 | 1 | Target slot |
-| 1 | 1 | Action: `0` down, `1` move, `2` up, `3` cancel |
-| 2 | 1 | Pointer id, range 0 through 31 |
-| 3 | 1 | Reserved, must be zero |
-| 4 | 4 | Nonzero input epoch returned by bind |
-| 8 | 4 | Nonzero, monotonically increasing target sequence |
-| 12 | 2 | Normalized X, 0 through 65535 |
-| 14 | 2 | Normalized Y, 0 through 65535 |
-| 16 | 2 | Normalized pressure, 0 through 65535 |
-| 18 | 2 | Normalized touch-major size, 0 through 65535 |
-| 20 | 4 | Reserved, must be zero |
-
-DOWN and MOVE require nonzero pressure. CANCEL carries zero coordinates,
-pressure, and touch-major size, uses pointer id zero, and cancels every active
-pointer in the target gesture. The Android side converts normalized coordinates
-to the logical dimensions fixed by the matching input epoch; coded video size is
-never used for input. Events with an unknown slot or stale epoch are dropped.
-Malformed events, repeated or decreasing sequences, and invalid pointer state
-cancel the affected target gesture so that Android cannot retain a stuck pointer.
-
-FDO1 only describes the userspace transport. FloralDroid input execution does
-not create a kernel uinput/evdev device; the operation service injects framework
-motion events directly and assigns the resolved Android display id.
