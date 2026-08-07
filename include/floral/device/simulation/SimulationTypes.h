@@ -57,4 +57,35 @@ struct SimulationUpdate {
     uint64_t generation = 0;
 };
 
+enum class StateSource : int32_t {
+    kAutonomous = 0,
+    kExternalStream = 1,
+};
+
+enum class MotionProfile : int32_t {
+    kStationary = 0,
+    kWalking = 1,
+    kRunning = 2,
+    kVehicle = 3,
+};
+
+// This is the validated, implementation-facing representation shared by all
+// simulation HALs. The AIDL type remains the external service contract.
+struct SimulationConfig {
+    uint64_t generation = 1;
+    StateSource motion_source = StateSource::kAutonomous;
+    StateSource gnss_source = StateSource::kAutonomous;
+    MotionProfile motion_profile = MotionProfile::kStationary;
+    bool gnss_enabled = true;
+    float target_light_lux = 200.0f;
+    float target_proximity_cm = 5.0f;
+    float target_pressure_hpa = 1013.25f;
+    double anchor_latitude_degrees = 35.681236;
+    double anchor_longitude_degrees = 139.767125;
+    double anchor_altitude_meters = 20.0;
+    float ground_speed_mps = 0.0f;
+    float bearing_degrees = 0.0f;
+    int32_t transition_duration_ms = 1000;
+};
+
 }  // namespace floral::device::simulation

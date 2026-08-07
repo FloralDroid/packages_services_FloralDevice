@@ -64,5 +64,7 @@ using SerializedExternalStateRecord = std::array<int8_t, kExternalStateRecordSiz
 
 bool SerializeExternalStateRecord(const ExternalStateRecord& record,
                                   SerializedExternalStateRecord* output, std::string* error);
+bool ParseExternalStateRecord(const SerializedExternalStateRecord& input,
+                              ExternalStateRecord* record, std::string* error);
 
 }  // namespace floral::device::simulation

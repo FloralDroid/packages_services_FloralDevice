@@ -1,1 +1,2 @@
 type floral_device_service, service_manager_type, vendor_service;
+type floral_power_service, service_manager_type, vendor_service;

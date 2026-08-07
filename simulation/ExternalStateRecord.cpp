@@ -60,6 +60,43 @@ void WriteDouble(int8_t* output, double value) {
     WriteUint64(output, bits);
 }
 
+uint16_t ReadUint16(const int8_t* input) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(input);
+    return static_cast<uint16_t>((static_cast<uint16_t>(bytes[0]) << 8) | bytes[1]);
+}
+
+uint32_t ReadUint32(const int8_t* input) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(input);
+    uint32_t value = 0;
+    for (size_t index = 0; index < sizeof(value); ++index) {
+        value = (value << 8) | bytes[index];
+    }
+    return value;
+}
+
+uint64_t ReadUint64(const int8_t* input) {
+    const auto* bytes = reinterpret_cast<const uint8_t*>(input);
+    uint64_t value = 0;
+    for (size_t index = 0; index < sizeof(value); ++index) {
+        value = (value << 8) | bytes[index];
+    }
+    return value;
+}
+
+float ReadFloat(const int8_t* input) {
+    const uint32_t bits = ReadUint32(input);
+    float value = 0.0f;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+double ReadDouble(const int8_t* input) {
+    const uint64_t bits = ReadUint64(input);
+    double value = 0.0;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
 bool IsFinite(const ExternalStateRecord& record) {
     return std::isfinite(record.orientation_x) && std::isfinite(record.orientation_y) &&
            std::isfinite(record.orientation_z) && std::isfinite(record.orientation_w) &&
@@ -120,6 +157,57 @@ bool SerializeExternalStateRecord(const ExternalStateRecord& record,
     WriteFloat(output->data() + 100, record.bearing_degrees);
     WriteFloat(output->data() + 104, record.horizontal_accuracy_meters);
     WriteFloat(output->data() + 108, record.vertical_accuracy_meters);
+    return true;
+}
+
+bool ParseExternalStateRecord(const SerializedExternalStateRecord& input,
+                              ExternalStateRecord* record, std::string* error) {
+    if (record == nullptr) {
+        return SetError(error, "parsed external state output is null");
+    }
+    if (ReadUint32(input.data()) != kExternalStateRecordMagic ||
+        ReadUint16(input.data() + 4) != kExternalStateRecordVersion ||
+        ReadUint16(input.data() + 6) != kExternalStateRecordSize ||
+        ReadUint32(input.data() + 20) != 0) {
+        return SetError(error, "external state record header is invalid");
+    }
+
+    ExternalStateRecord parsed;
+    parsed.generation = ReadUint64(input.data() + 8);
+    parsed.flags = ReadUint32(input.data() + 16);
+    parsed.timestamp_ns = static_cast<int64_t>(ReadUint64(input.data() + 24));
+    parsed.orientation_x = ReadFloat(input.data() + 32);
+    parsed.orientation_y = ReadFloat(input.data() + 36);
+    parsed.orientation_z = ReadFloat(input.data() + 40);
+    parsed.orientation_w = ReadFloat(input.data() + 44);
+    parsed.linear_acceleration_x = ReadFloat(input.data() + 48);
+    parsed.linear_acceleration_y = ReadFloat(input.data() + 52);
+    parsed.linear_acceleration_z = ReadFloat(input.data() + 56);
+    parsed.angular_velocity_x = ReadFloat(input.data() + 60);
+    parsed.angular_velocity_y = ReadFloat(input.data() + 64);
+    parsed.angular_velocity_z = ReadFloat(input.data() + 68);
+    parsed.latitude_degrees = ReadDouble(input.data() + 72);
+    parsed.longitude_degrees = ReadDouble(input.data() + 80);
+    parsed.altitude_meters = ReadDouble(input.data() + 88);
+    parsed.ground_speed_mps = ReadFloat(input.data() + 96);
+    parsed.bearing_degrees = ReadFloat(input.data() + 100);
+    parsed.horizontal_accuracy_meters = ReadFloat(input.data() + 104);
+    parsed.vertical_accuracy_meters = ReadFloat(input.data() + 108);
+    if (parsed.generation == 0 || parsed.timestamp_ns <= 0 ||
+        (parsed.flags & ~kKnownExternalStateFlags) != 0 ||
+        (parsed.flags & (kExternalStateHasPose | kExternalStateHasGnss)) == 0 ||
+        !IsFinite(parsed)) {
+        return SetError(error, "external state record body is invalid");
+    }
+    if ((parsed.flags & kExternalStateHasGnss) != 0 &&
+        (parsed.latitude_degrees < -90.0 || parsed.latitude_degrees > 90.0 ||
+         parsed.longitude_degrees < -180.0 || parsed.longitude_degrees > 180.0 ||
+         parsed.ground_speed_mps < 0.0f || parsed.bearing_degrees < 0.0f ||
+         parsed.bearing_degrees >= 360.0f || parsed.horizontal_accuracy_meters < 0.0f ||
+         parsed.vertical_accuracy_meters < 0.0f)) {
+        return SetError(error, "external GNSS state is outside its valid range");
+    }
+    *record = parsed;
     return true;
 }
 

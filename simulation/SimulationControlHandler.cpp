@@ -166,6 +166,35 @@ bool SimulationControlHandler::Handle(const control::ControlRequest& request,
         case control::ControlCommandId::kReplaceDisplayTopology:
         case control::ControlCommandId::kSetAudioEncoderConfig:
         case control::ControlCommandId::kSetVideoEncoderConfig:
+        case control::ControlCommandId::kSetPowerControl:
+        case control::ControlCommandId::kReleasePowerControl:
+        case control::ControlCommandId::kGetPowerSnapshot:
+        case control::ControlCommandId::kGetPowerCapabilities:
+        case control::ControlCommandId::kSetRadioRegistration:
+        case control::ControlCommandId::kSetRadioSignal:
+        case control::ControlCommandId::kReplaceRadioCells:
+        case control::ControlCommandId::kSetSimState:
+        case control::ControlCommandId::kInjectIncomingCall:
+        case control::ControlCommandId::kSetRadioCallState:
+        case control::ControlCommandId::kInjectIncomingSms:
+        case control::ControlCommandId::kReleaseRadioControl:
+        case control::ControlCommandId::kPushRadioSampleBatch:
+        case control::ControlCommandId::kGetRadioProfile:
+        case control::ControlCommandId::kGetRadioSnapshot:
+        case control::ControlCommandId::kListRadioCells:
+        case control::ControlCommandId::kListRadioCalls:
+        case control::ControlCommandId::kListRadioSmsEvents:
+        case control::ControlCommandId::kGetRadioCapabilities:
+        case control::ControlCommandId::kSetWifiEnabled:
+        case control::ControlCommandId::kReplaceWifiAccessPoints:
+        case control::ControlCommandId::kSetWifiConnection:
+        case control::ControlCommandId::kSetWifiLink:
+        case control::ControlCommandId::kReleaseWifiControl:
+        case control::ControlCommandId::kPushWifiSampleBatch:
+        case control::ControlCommandId::kGetWifiProfile:
+        case control::ControlCommandId::kGetWifiSnapshot:
+        case control::ControlCommandId::kListWifiAccessPoints:
+        case control::ControlCommandId::kGetWifiCapabilities:
             break;
     }
     return control::SerializeControlErrorResponse(

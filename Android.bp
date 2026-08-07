@@ -113,6 +113,83 @@ aidl_interface {
     },
 }
 
+aidl_interface {
+    name: "floral.device.power",
+    // Floral power owns the model; FloralDevice only adapts FHC1 requests.
+    owner: "floraldroid",
+    vendor_available: true,
+    local_include_dir: "aidl",
+    srcs: [
+        "aidl/floral/device/power/*.aidl",
+    ],
+    stability: "vintf",
+    backend: {
+        java: {
+            enabled: false,
+        },
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: true,
+        },
+    },
+}
+
+aidl_interface {
+    name: "floral.device.radio",
+    // The Radio process owns cellular identity and runtime state.
+    owner: "floraldroid",
+    vendor_available: true,
+    local_include_dir: "aidl",
+    srcs: [
+        "aidl/floral/device/radio/*.aidl",
+    ],
+    stability: "vintf",
+    backend: {
+        java: {
+            enabled: false,
+        },
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: true,
+        },
+    },
+}
+
+aidl_interface {
+    name: "floral.device.wifi",
+    // The Wi-Fi model is shared by vendor control and modular system services.
+    owner: "floraldroid",
+    vendor_available: true,
+    local_include_dir: "aidl",
+    srcs: [
+        "aidl/floral/device/wifi/*.aidl",
+    ],
+    stability: "vintf",
+    backend: {
+        java: {
+            enabled: true,
+            sdk_version: "module_current",
+            min_sdk_version: "30",
+            apex_available: [
+                "//apex_available:platform",
+                "com.android.tethering",
+                "com.android.wifi",
+                "test_com.android.wifi",
+            ],
+        },
+        cpp: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: true,
+        },
+    },
+}
+
 cc_defaults {
     name: "floral_device_common_defaults",
     cflags: [
@@ -127,6 +204,51 @@ cc_defaults {
     static_libs: [
         "libarect",
     ],
+}
+
+cc_defaults {
+    name: "floral_device_simulation_defaults",
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    cpp_std: "c++17",
+    local_include_dirs: ["include"],
+}
+
+cc_library_static {
+    name: "libfloral_device_simulation_common",
+    defaults: ["floral_device_simulation_defaults"],
+    vendor_available: true,
+    host_supported: true,
+    srcs: [
+        "simulation/ExternalStateRecord.cpp",
+        "simulation/RandomProcess.cpp",
+    ],
+    export_include_dirs: ["include"],
+}
+
+cc_library_static {
+    name: "libfloral_device_simulation_client",
+    defaults: ["floral_device_simulation_defaults"],
+    vendor_available: true,
+    srcs: ["simulation/SimulationStateClient.cpp"],
+    static_libs: [
+        "libaidlcommonsupport",
+        "libfloral_device_simulation_common",
+    ],
+    shared_libs: [
+        "android.hardware.common-V2-ndk_platform",
+        "android.hardware.common.fmq-V1-ndk_platform",
+        "floral.device.simulation-V1-ndk_platform",
+        "libbase",
+        "libbinder_ndk",
+        "libcutils",
+        "libfmq",
+        "liblog",
+    ],
+    export_include_dirs: ["include"],
 }
 
 cc_library_static {
@@ -382,20 +504,29 @@ cc_library_static {
         "topology/DisplayTopologyControlHandler.cpp",
         "topology/DisplayTopologyControlProtocol.cpp",
         "topology/DisplayTopologyStateService.cpp",
-        "simulation/ExternalStateRecord.cpp",
         "simulation/SimulationControlHandler.cpp",
         "simulation/SimulationControlProtocol.cpp",
         "simulation/SimulationController.cpp",
         "simulation/SimulationStateService.cpp",
+        "power/PowerControlHandler.cpp",
+        "power/PowerControlProtocol.cpp",
+        "radio/RadioControlHandler.cpp",
+        "radio/RadioControlProtocol.cpp",
+        "wifi/WifiControlHandler.cpp",
+        "wifi/WifiControlProtocol.cpp",
     ],
     static_libs: [
         "libaidlcommonsupport",
+        "libfloral_device_simulation_common",
         "libfloral_hal_control",
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
         "android.hardware.common.fmq-V1-ndk_platform",
         "floral.device.display.topology-V1-ndk_platform",
+        "floral.device.power-V1-ndk_platform",
+        "floral.device.radio-V1-ndk_platform",
+        "floral.device.wifi-V1-ndk_platform",
         "floral.device.simulation-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
@@ -454,6 +585,7 @@ cc_binary {
         "libfloral_hal_control",
         "libfloral_device_display_ingress",
         "libfloral_device_display_service",
+        "libfloral_device_simulation_common",
         "libfloral_hal_control_center",
         "libfloral_device_runtime",
         "libfloral_stream_session",
@@ -467,6 +599,9 @@ cc_binary {
         "floral.device.audio-V1-ndk_platform",
         "floral.device.display-V1-ndk_platform",
         "floral.device.display.topology-V1-ndk_platform",
+        "floral.device.power-V1-ndk_platform",
+        "floral.device.radio-V1-ndk_platform",
+        "floral.device.wifi-V1-ndk_platform",
         "floral.device.simulation-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",
@@ -588,7 +723,10 @@ cc_test {
         "tests/DisplayTopologyStateServiceTest.cpp",
         "tests/FrameConsumerServiceTest.cpp",
         "tests/HardwareBufferImporterTest.cpp",
+        "tests/PowerControlProtocolTest.cpp",
+        "tests/RadioControlProtocolTest.cpp",
         "tests/SimulationControlProtocolTest.cpp",
+        "tests/WifiControlProtocolTest.cpp",
     ],
     static_libs: [
         "libfloral_hal_control_center",
@@ -597,6 +735,7 @@ cc_test {
         "libfloral_hal_control",
         "libfloral_device_display_ingress",
         "libfloral_device_display_service",
+        "libfloral_device_simulation_common",
     ],
     shared_libs: [
         "android.hardware.common-V2-ndk_platform",
@@ -604,6 +743,9 @@ cc_test {
         "android.hardware.graphics.common-V2-ndk_platform",
         "floral.device.display-V1-ndk_platform",
         "floral.device.display.topology-V1-ndk_platform",
+        "floral.device.power-V1-ndk_platform",
+        "floral.device.radio-V1-ndk_platform",
+        "floral.device.wifi-V1-ndk_platform",
         "floral.device.simulation-V1-ndk_platform",
         "libbase",
         "libbinder_ndk",

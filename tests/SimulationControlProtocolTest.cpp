@@ -257,5 +257,37 @@ TEST(SimulationControlProtocolTest, FullExternalQueueMarksNextDeliveredRecordDis
               0u);
 }
 
+TEST(SimulationControlProtocolTest, ExternalStateRecordRoundTripsThroughFss1Codec) {
+    ExternalStateRecord input;
+    input.generation = 7;
+    input.flags = kExternalStateHasPose | kExternalStateHasGnss;
+    input.timestamp_ns = 123456789;
+    input.orientation_z = 0.25f;
+    input.orientation_w = 0.9682458f;
+    input.linear_acceleration_x = 1.5f;
+    input.angular_velocity_y = -0.125f;
+    input.latitude_degrees = 31.2304;
+    input.longitude_degrees = 121.4737;
+    input.altitude_meters = 12.5;
+    input.ground_speed_mps = 4.25f;
+    input.bearing_degrees = 87.0f;
+    input.horizontal_accuracy_meters = 3.0f;
+    input.vertical_accuracy_meters = 5.0f;
+
+    SerializedExternalStateRecord serialized{};
+    std::string error;
+    ASSERT_TRUE(SerializeExternalStateRecord(input, &serialized, &error)) << error;
+    ExternalStateRecord output;
+    ASSERT_TRUE(ParseExternalStateRecord(serialized, &output, &error)) << error;
+    EXPECT_EQ(output.generation, input.generation);
+    EXPECT_EQ(output.flags, input.flags);
+    EXPECT_EQ(output.timestamp_ns, input.timestamp_ns);
+    EXPECT_FLOAT_EQ(output.orientation_z, input.orientation_z);
+    EXPECT_FLOAT_EQ(output.linear_acceleration_x, input.linear_acceleration_x);
+    EXPECT_DOUBLE_EQ(output.latitude_degrees, input.latitude_degrees);
+    EXPECT_DOUBLE_EQ(output.longitude_degrees, input.longitude_degrees);
+    EXPECT_FLOAT_EQ(output.ground_speed_mps, input.ground_speed_mps);
+}
+
 }  // namespace
 }  // namespace floral::device::simulation

@@ -23,12 +23,15 @@
 #include "floral/device/display/topology/DisplayTopologyControlHandler.h"
 #include "floral/device/display/topology/DisplayTopologyController.h"
 #include "floral/device/display/topology/DisplayTopologyStateService.h"
+#include "floral/device/power/PowerControlHandler.h"
+#include "floral/device/radio/RadioControlHandler.h"
 #include "floral/device/service/AudioEncoderControlHandler.h"
 #include "floral/device/service/VideoEncoderControlHandler.h"
 #include "floral/device/service/VideoFrameConsumerBackend.h"
 #include "floral/device/simulation/SimulationControlHandler.h"
 #include "floral/device/simulation/SimulationController.h"
 #include "floral/device/simulation/SimulationStateService.h"
+#include "floral/device/wifi/WifiControlHandler.h"
 #include "floral/stream/audio/AudioStreamSession.h"
 
 #include <aidl/floral/device/audio/IAudioPcmSink.h>
@@ -171,9 +174,17 @@ int main(int argc, char** argv) {
     auto simulationControlHandler =
             std::make_shared<floral::device::simulation::SimulationControlHandler>(
                     simulationController);
+    auto powerControlHandler =
+            std::make_shared<floral::device::power::PowerControlHandler>();
+    auto radioControlHandler =
+            std::make_shared<floral::device::radio::RadioControlHandler>();
+    auto wifiControlHandler =
+            std::make_shared<floral::device::wifi::WifiControlHandler>();
     auto deviceControlHandler = std::make_shared<floral::device::control::DeviceControlHandler>(
             std::move(topologyControlHandler), std::move(audioControlHandler),
-            std::move(videoControlHandler), std::move(simulationControlHandler));
+            std::move(videoControlHandler), std::move(simulationControlHandler),
+            std::move(powerControlHandler), std::move(radioControlHandler),
+            std::move(wifiControlHandler));
     const std::string audioPcmInstance =
             std::string(aidl::floral::device::audio::IAudioPcmSink::descriptor) + "/default";
     const std::string frameInstance =

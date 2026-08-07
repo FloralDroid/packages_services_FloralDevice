@@ -25,11 +25,17 @@ namespace floral::device::control {
 DeviceControlHandler::DeviceControlHandler(std::shared_ptr<ControlRequestHandler> topology_handler,
                                            std::shared_ptr<ControlRequestHandler> audio_handler,
                                            std::shared_ptr<ControlRequestHandler> video_handler,
-                                           std::shared_ptr<ControlRequestHandler> simulation_handler)
+                                           std::shared_ptr<ControlRequestHandler> simulation_handler,
+                                           std::shared_ptr<ControlRequestHandler> power_handler,
+                                           std::shared_ptr<ControlRequestHandler> radio_handler,
+                                           std::shared_ptr<ControlRequestHandler> wifi_handler)
     : topology_handler_(std::move(topology_handler)),
       audio_handler_(std::move(audio_handler)),
       video_handler_(std::move(video_handler)),
-      simulation_handler_(std::move(simulation_handler)) {}
+      simulation_handler_(std::move(simulation_handler)),
+      power_handler_(std::move(power_handler)),
+      radio_handler_(std::move(radio_handler)),
+      wifi_handler_(std::move(wifi_handler)) {}
 
 bool DeviceControlHandler::Handle(const ControlRequest& request, ControlResponse* response,
                                   std::string* error) {
@@ -77,6 +83,47 @@ bool DeviceControlHandler::Handle(const ControlRequest& request, ControlResponse
                 return simulation_handler_->Handle(request, response, error);
             }
             break;
+        case ControlCommandId::kSetPowerControl:
+        case ControlCommandId::kReleasePowerControl:
+        case ControlCommandId::kGetPowerSnapshot:
+        case ControlCommandId::kGetPowerCapabilities:
+            if (power_handler_ != nullptr) {
+                return power_handler_->Handle(request, response, error);
+            }
+            break;
+        case ControlCommandId::kSetRadioRegistration:
+        case ControlCommandId::kSetRadioSignal:
+        case ControlCommandId::kReplaceRadioCells:
+        case ControlCommandId::kSetSimState:
+        case ControlCommandId::kInjectIncomingCall:
+        case ControlCommandId::kSetRadioCallState:
+        case ControlCommandId::kInjectIncomingSms:
+        case ControlCommandId::kReleaseRadioControl:
+        case ControlCommandId::kPushRadioSampleBatch:
+        case ControlCommandId::kGetRadioProfile:
+        case ControlCommandId::kGetRadioSnapshot:
+        case ControlCommandId::kListRadioCells:
+        case ControlCommandId::kListRadioCalls:
+        case ControlCommandId::kListRadioSmsEvents:
+        case ControlCommandId::kGetRadioCapabilities:
+            if (radio_handler_ != nullptr) {
+                return radio_handler_->Handle(request, response, error);
+            }
+            break;
+        case ControlCommandId::kSetWifiEnabled:
+        case ControlCommandId::kReplaceWifiAccessPoints:
+        case ControlCommandId::kSetWifiConnection:
+        case ControlCommandId::kSetWifiLink:
+        case ControlCommandId::kReleaseWifiControl:
+        case ControlCommandId::kPushWifiSampleBatch:
+        case ControlCommandId::kGetWifiProfile:
+        case ControlCommandId::kGetWifiSnapshot:
+        case ControlCommandId::kListWifiAccessPoints:
+        case ControlCommandId::kGetWifiCapabilities:
+            if (wifi_handler_ != nullptr) {
+                return wifi_handler_->Handle(request, response, error);
+            }
+            break;
         case ControlCommandId::kGenericError:
             break;
     }
@@ -97,6 +144,15 @@ void DeviceControlHandler::OnAuthorityLeaseExpired() {
     }
     if (simulation_handler_ != nullptr) {
         simulation_handler_->OnAuthorityLeaseExpired();
+    }
+    if (power_handler_ != nullptr) {
+        power_handler_->OnAuthorityLeaseExpired();
+    }
+    if (radio_handler_ != nullptr) {
+        radio_handler_->OnAuthorityLeaseExpired();
+    }
+    if (wifi_handler_ != nullptr) {
+        wifi_handler_->OnAuthorityLeaseExpired();
     }
 }
 

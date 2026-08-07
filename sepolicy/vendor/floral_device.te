@@ -5,6 +5,13 @@ init_daemon_domain(floral_device)
 binder_use(floral_device)
 binder_service(floral_device)
 add_service(floral_device, floral_device_service)
+allow floral_device floral_power_service:service_manager find;
+binder_call(floral_device, hal_power_default)
+binder_call(hal_power_default, floral_device)
+allow floral_device floral_radio_service:service_manager find;
+binder_call(floral_device, rild)
+allow floral_device floral_wifi_service:service_manager find;
+binder_call(floral_device, floral_wifi)
 
 # MediaCodec and EGL use standard allocator and codec HAL clients internally.
 hal_client_domain(floral_device, hal_configstore)
