@@ -140,6 +140,13 @@ TEST(RadioControlProtocolTest, SerializesFixedSnapshot) {
     EXPECT_FALSE(response.refreshes_authority_lease);
 }
 
+TEST(RadioControlProtocolTest, CapabilitiesDoNotClaimProfilePersistence) {
+    control::ControlResponse response;
+    std::string error;
+    ASSERT_TRUE(SerializeRadioCapabilitiesResponse(10, &response, &error)) << error;
+    EXPECT_EQ(ReadUint32(response.payload.data() + 4), 0x0dU);
+}
+
 TEST(RadioControlProtocolTest, SmsListKeepsNewestEventsWithinPayloadLimit) {
     std::vector<aidl::floral::device::radio::RadioSmsEvent> events(64);
     for (size_t index = 0; index < events.size(); ++index) {

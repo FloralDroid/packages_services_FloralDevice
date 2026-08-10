@@ -366,6 +366,10 @@ Command ids `0x0700` through `0x0715` control and inspect cellular registration,
 signal, cells, SIM state, calls, and SMS events. A bounded external-control lease
 applies to registration, signal, cell, and SIM mutations. Explicit release,
 lease expiry, or FHC1 authority expiry restores the autonomous radio state.
+A valid `/ipc/floral_stream/radio.json` is required to enable that state.
+Missing or invalid configuration reports radio off, SIM absent, unknown signal,
+and no cells; mutation commands return result `2` instead of creating a default
+profile.
 
 | Command | Name | Request payload | Response payload |
 | ---: | --- | --- | --- |
@@ -450,10 +454,10 @@ at 8 and 16, address and body lengths at 24 and 28, then the two strings at 32.
 The list header reports the records actually returned; the SMS query keeps the
 newest events when the FHC1 payload limit prevents returning the full history.
 
-The `0x0715` capabilities response stores flags `0x0f`, maximum cells `32`,
+The `0x0715` capabilities response stores flags `0x0d`, maximum cells `32`,
 maximum calls `8`, maximum SMS events `64`, maximum lease `60000`, and
 technology mask `0x0e` at offsets 4, 8, 12, 16, 20, and 24. The flags mean
-autonomous behavior, profile persistence, internal entropy, and runtime leases.
+autonomous behavior for a mounted profile, internal entropy, and runtime leases.
 
 ## Wi-Fi simulation commands
 

@@ -478,7 +478,7 @@ bool SerializeRadioCapabilitiesResponse(uint32_t request_id, control::ControlRes
                          kCapabilitiesResponseSize, response, error)) {
         return false;
     }
-    constexpr uint32_t kFlags = 0x0f;         // Autonomous, persistence, entropy, runtime leases.
+    constexpr uint32_t kFlags = 0x0d;         // Autonomous, entropy, and runtime leases.
     constexpr uint64_t kTechnologies = 0x0e;  // GSM, WCDMA, and LTE; no NR claim.
     WriteUint16(response->payload.data(), kRadioControlVersion);
     WriteUint16(response->payload.data() + 2, kCapabilitiesResponseSize);
