@@ -27,6 +27,7 @@ namespace {
 
 // MediaCodec's Surface input format is the Android opaque OMX color format.
 constexpr int32_t kColorFormatSurface = 0x7f000789;
+constexpr int64_t kStaticFrameRepeatDelayUs = 1'000'000;
 constexpr char kParameterKeyVideoBitrate[] = "video-bitrate";
 constexpr char kParameterKeyRequestSyncFrame[] = "request-sync";
 
@@ -109,6 +110,8 @@ std::unique_ptr<MediaCodecSurfaceEncoder> MediaCodecSurfaceEncoder::Create(
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL,
                           static_cast<int32_t>(config.i_frame_interval_seconds));
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, kColorFormatSurface);
+    AMediaFormat_setInt64(format, AMEDIAFORMAT_KEY_REPEAT_PREVIOUS_FRAME_AFTER,
+                          kStaticFrameRepeatDelayUs);
 
     status = AMediaCodec_configure(encoder->codec_, format, nullptr, nullptr,
                                    AMEDIACODEC_CONFIGURE_FLAG_ENCODE);

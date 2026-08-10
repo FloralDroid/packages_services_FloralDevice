@@ -50,11 +50,13 @@ class EncoderSession {
     void UnregisterBuffer(uint64_t bufferId);
     FrameCopyResult SubmitFrame(uint64_t bufferId, android::base::unique_fd acquireFence,
                                 int64_t presentationTimeNanos, std::string* error);
+    FrameCopyResult RepeatLastFrame(int64_t presentationTimeNanos, std::string* error);
 
     bool SetBitrate(uint32_t bitrateBps, std::string* error);
     bool RequestKeyFrame(std::string* error);
     bool SignalEndOfInputStream(std::string* error);
     DequeueResult DequeueOutput(int64_t timeoutUs);
+    StaticFrameRepeatMode static_frame_repeat_mode() const;
 
     const EncoderConfig& config() const;
     const std::string& codec_name() const;

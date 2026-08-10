@@ -140,6 +140,9 @@ struct FfmpegVaapiEncoderBackend::Impl {
           va_device_path(std::move(devicePath)) {}
 
     ~Impl() {
+        if (latest_frame != nullptr) {
+            av_frame_free(&latest_frame);
+        }
         if (codec_context != nullptr) {
             avcodec_free_context(&codec_context);
         }
@@ -613,6 +616,44 @@ struct FfmpegVaapiEncoderBackend::Impl {
             force_key_frame = false;
         }
 
+        AVFrame* cachedFrame = av_frame_clone(frame);
+        if (cachedFrame == nullptr) {
+            av_frame_free(&frame);
+            SetError(error, "av_frame_clone failed while retaining the latest frame");
+            return result;
+        }
+        cachedFrame->pict_type = AV_PICTURE_TYPE_NONE;
+
+        const bool accepted = QueuePacketsUntilInputAccepted(frame, error);
+        av_frame_free(&frame);
+        if (!accepted) {
+            av_frame_free(&cachedFrame);
+            return result;
+        }
+        av_frame_free(&latest_frame);
+        latest_frame = cachedFrame;
+        result.success = true;
+        result.completed_synchronously = true;
+        return result;
+    }
+
+    FrameCopyResult RepeatLastFrame(int64_t presentationTimeNanos, std::string* error) {
+        FrameCopyResult result;
+        if (presentationTimeNanos < 0 || drain_submitted || latest_frame == nullptr) {
+            SetError(error, "no retained frame is available or the encoder is draining");
+            return result;
+        }
+
+        AVFrame* frame = av_frame_clone(latest_frame);
+        if (frame == nullptr) {
+            SetError(error, "av_frame_clone failed while repeating the latest frame");
+            return result;
+        }
+        frame->pts = av_rescale_q(presentationTimeNanos, AVRational{1, 1'000'000'000},
+                                  codec_context->time_base);
+        frame->pict_type = force_key_frame ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
+        force_key_frame = false;
+
         const bool accepted = QueuePacketsUntilInputAccepted(frame, error);
         av_frame_free(&frame);
         if (!accepted) {
@@ -739,8 +780,10 @@ struct FfmpegVaapiEncoderBackend::Impl {
     VASurfaceID rotation_surface = VA_INVALID_SURFACE;
     std::unique_ptr<EglFrameCopier> rotation_copier;
 
-    // FFmpeg encoder and pending encoded output.
+    // The retained frame owns a reference to its VA surface, so static repeats
+    // remain independent of SurfaceFlinger buffer registration changes.
     AVCodecContext* codec_context = nullptr;
+    AVFrame* latest_frame = nullptr;
     AVPacket* packet = nullptr;
     std::deque<EncodedPacket> pending_packets;
     bool format_change_pending = false;
@@ -784,6 +827,11 @@ FrameCopyResult FfmpegVaapiEncoderBackend::SubmitFrame(uint64_t bufferId,
     return impl_->SubmitFrame(bufferId, std::move(acquireFence), presentationTimeNanos, error);
 }
 
+FrameCopyResult FfmpegVaapiEncoderBackend::RepeatLastFrame(int64_t presentationTimeNanos,
+                                                           std::string* error) {
+    return impl_->RepeatLastFrame(presentationTimeNanos, error);
+}
+
 bool FfmpegVaapiEncoderBackend::SetBitrate(uint32_t bitrateBps, std::string* error) {
     return impl_->SetBitrate(bitrateBps, error);
 }
@@ -809,6 +857,10 @@ bool FfmpegVaapiEncoderBackend::SignalEndOfInputStream(std::string* error) {
 
 DequeueResult FfmpegVaapiEncoderBackend::DequeueOutput(int64_t timeoutUs) {
     return impl_->DequeueOutput(timeoutUs);
+}
+
+StaticFrameRepeatMode FfmpegVaapiEncoderBackend::static_frame_repeat_mode() const {
+    return StaticFrameRepeatMode::kBackendManaged;
 }
 
 const EncoderConfig& FfmpegVaapiEncoderBackend::config() const {

@@ -31,6 +31,14 @@ enum class EncoderBackendType {
     kFfmpegVaapi,
 };
 
+// The stream worker either drains codec-managed repeats or asks the backend to
+// resubmit its private frame copy.
+enum class StaticFrameRepeatMode {
+    kUnsupported,
+    kCodecManaged,
+    kBackendManaged,
+};
+
 struct EncoderConfig {
     EncoderBackendType backend = EncoderBackendType::kMediaCodecSoftware;
     std::string mime = "video/avc";

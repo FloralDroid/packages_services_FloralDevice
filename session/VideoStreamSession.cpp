@@ -99,6 +99,11 @@ codec::FrameCopyResult VideoStreamSession::SubmitFrame(uint64_t bufferId,
     return result;
 }
 
+codec::FrameCopyResult VideoStreamSession::RepeatLastFrame(int64_t presentationTimeNanos,
+                                                           std::string* error) {
+    return encoder_->RepeatLastFrame(presentationTimeNanos, error);
+}
+
 bool VideoStreamSession::SetBitrate(uint32_t bitrateBps, std::string* error) {
     return encoder_->SetBitrate(bitrateBps, error);
 }
@@ -118,6 +123,10 @@ VideoStreamDrainResult VideoStreamSession::DrainOutput(int64_t timeoutUs, std::s
         result.success = false;
     }
     return result;
+}
+
+codec::StaticFrameRepeatMode VideoStreamSession::static_frame_repeat_mode() const {
+    return encoder_->static_frame_repeat_mode();
 }
 
 const codec::EncoderConfig& VideoStreamSession::encoder_config() const {

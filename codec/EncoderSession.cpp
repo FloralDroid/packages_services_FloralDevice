@@ -61,6 +61,14 @@ class MediaCodecEncoderBackend final : public EncoderBackend {
                                         error);
     }
 
+    FrameCopyResult RepeatLastFrame(int64_t presentationTimeNanos, std::string* error) override {
+        (void)presentationTimeNanos;
+        if (error != nullptr) {
+            *error = "MediaCodec owns static frame repetition";
+        }
+        return {};
+    }
+
     bool SetBitrate(uint32_t bitrateBps, std::string* error) override {
         return encoder_->SetBitrate(bitrateBps, error);
     }
@@ -73,6 +81,10 @@ class MediaCodecEncoderBackend final : public EncoderBackend {
 
     DequeueResult DequeueOutput(int64_t timeoutUs) override {
         return encoder_->DequeueOutput(timeoutUs);
+    }
+
+    StaticFrameRepeatMode static_frame_repeat_mode() const override {
+        return StaticFrameRepeatMode::kCodecManaged;
     }
 
     const EncoderConfig& config() const override { return encoder_->config(); }
@@ -156,6 +168,10 @@ FrameCopyResult EncoderSession::SubmitFrame(uint64_t bufferId,
     return backend_->SubmitFrame(bufferId, std::move(acquireFence), presentationTimeNanos, error);
 }
 
+FrameCopyResult EncoderSession::RepeatLastFrame(int64_t presentationTimeNanos, std::string* error) {
+    return backend_->RepeatLastFrame(presentationTimeNanos, error);
+}
+
 bool EncoderSession::SetBitrate(uint32_t bitrateBps, std::string* error) {
     return backend_->SetBitrate(bitrateBps, error);
 }
@@ -170,6 +186,10 @@ bool EncoderSession::SignalEndOfInputStream(std::string* error) {
 
 DequeueResult EncoderSession::DequeueOutput(int64_t timeoutUs) {
     return backend_->DequeueOutput(timeoutUs);
+}
+
+StaticFrameRepeatMode EncoderSession::static_frame_repeat_mode() const {
+    return backend_->static_frame_repeat_mode();
 }
 
 const EncoderConfig& EncoderSession::config() const {

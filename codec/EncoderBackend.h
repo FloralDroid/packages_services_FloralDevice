@@ -39,11 +39,13 @@ class EncoderBackend {
     virtual void UnregisterBuffer(uint64_t bufferId) = 0;
     virtual FrameCopyResult SubmitFrame(uint64_t bufferId, android::base::unique_fd acquireFence,
                                         int64_t presentationTimeNanos, std::string* error) = 0;
+    virtual FrameCopyResult RepeatLastFrame(int64_t presentationTimeNanos, std::string* error) = 0;
 
     virtual bool SetBitrate(uint32_t bitrateBps, std::string* error) = 0;
     virtual bool RequestKeyFrame(std::string* error) = 0;
     virtual bool SignalEndOfInputStream(std::string* error) = 0;
     virtual DequeueResult DequeueOutput(int64_t timeoutUs) = 0;
+    virtual StaticFrameRepeatMode static_frame_repeat_mode() const = 0;
 
     virtual const EncoderConfig& config() const = 0;
     virtual const std::string& codec_name() const = 0;

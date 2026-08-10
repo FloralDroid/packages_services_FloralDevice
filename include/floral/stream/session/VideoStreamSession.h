@@ -67,10 +67,12 @@ class VideoStreamSession {
     codec::FrameCopyResult SubmitFrame(uint64_t bufferId, android::base::unique_fd acquireFence,
                                        int64_t presentationTimeNanos, uint64_t frameSubmitTimeNanos,
                                        std::string* error);
+    codec::FrameCopyResult RepeatLastFrame(int64_t presentationTimeNanos, std::string* error);
 
     bool SetBitrate(uint32_t bitrateBps, std::string* error);
     bool SignalEndOfInputStream(std::string* error);
     VideoStreamDrainResult DrainOutput(int64_t timeoutUs, std::string* error);
+    codec::StaticFrameRepeatMode static_frame_repeat_mode() const;
 
     const codec::EncoderConfig& encoder_config() const;
     const std::string& codec_name() const;

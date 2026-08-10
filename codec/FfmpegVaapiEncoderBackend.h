@@ -41,11 +41,13 @@ class FfmpegVaapiEncoderBackend final : public EncoderBackend {
     void UnregisterBuffer(uint64_t bufferId) override;
     FrameCopyResult SubmitFrame(uint64_t bufferId, android::base::unique_fd acquireFence,
                                 int64_t presentationTimeNanos, std::string* error) override;
+    FrameCopyResult RepeatLastFrame(int64_t presentationTimeNanos, std::string* error) override;
 
     bool SetBitrate(uint32_t bitrateBps, std::string* error) override;
     bool RequestKeyFrame(std::string* error) override;
     bool SignalEndOfInputStream(std::string* error) override;
     DequeueResult DequeueOutput(int64_t timeoutUs) override;
+    StaticFrameRepeatMode static_frame_repeat_mode() const override;
 
     const EncoderConfig& config() const override;
     const std::string& codec_name() const override;

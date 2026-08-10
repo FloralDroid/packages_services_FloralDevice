@@ -619,6 +619,16 @@ void RunFfmpegVaapiDmaBufEncodingTest(const VideoGeometry& geometry) {
         ASSERT_TRUE(collector.DrainAvailable(session.get(), &error)) << error;
     }
 
+    const size_t packetsBeforeRepeat = collector.frame_packet_count();
+    FrameCopyResult repeated = session->RepeatLastFrame(
+            static_cast<int64_t>(kFrameCount + 1) * framePeriodNanos, &error);
+    ASSERT_TRUE(repeated.success) << error;
+    const auto repeatDeadline = Clock::now() + std::chrono::seconds(2);
+    while (collector.frame_packet_count() == packetsBeforeRepeat && Clock::now() < repeatDeadline) {
+        ASSERT_TRUE(collector.DrainOnce(session.get(), 100'000, &error)) << error;
+    }
+    EXPECT_GT(collector.frame_packet_count(), packetsBeforeRepeat);
+
     session->UnregisterBuffer(bufferId);
     ASSERT_TRUE(session->SignalEndOfInputStream(&error)) << error;
     const auto drainDeadline = Clock::now() + std::chrono::seconds(10);
@@ -628,7 +638,7 @@ void RunFfmpegVaapiDmaBufEncodingTest(const VideoGeometry& geometry) {
 
     ASSERT_TRUE(collector.end_of_stream());
     ASSERT_TRUE(collector.format_changed());
-    EXPECT_EQ(collector.frame_packet_count(), kFrameCount);
+    EXPECT_EQ(collector.frame_packet_count(), kFrameCount + 1);
     EXPECT_TRUE(ContainsAnnexBNalType(collector.bitstream(), 7)) << "missing H.264 SPS";
     EXPECT_TRUE(ContainsAnnexBNalType(collector.bitstream(), 5)) << "missing H.264 IDR frame";
 }
@@ -720,7 +730,7 @@ TEST(VideoStreamSessionTest, SendsEncodedFramesWithMatchedSubmissionTimestamps) 
     stream->UnregisterBuffer(bufferId);
 }
 
-TEST(VideoFrameConsumerBackendTest, DrainsAsynchronousOutputAfterDisplayBecomesStatic) {
+TEST(VideoFrameConsumerBackendTest, RepeatsEncodedOutputAfterDisplayBecomesStatic) {
     ::floral::device::service::VideoFrameConsumerBackendConfig config;
     config.display_id = 1;
     config.video_socket_path = "/data/local/tmp/floral-video-backend-test-" +
@@ -788,6 +798,7 @@ TEST(VideoFrameConsumerBackendTest, DrainsAsynchronousOutputAfterDisplayBecomesS
 
     bool receivedConfig = false;
     bool receivedKeyFrame = false;
+    uint64_t lastSequence = 0;
     for (size_t packet = 0; packet < 4 && !receivedKeyFrame; ++packet) {
         transport::VideoPacketHeader header;
         std::vector<uint8_t> payload;
@@ -795,6 +806,7 @@ TEST(VideoFrameConsumerBackendTest, DrainsAsynchronousOutputAfterDisplayBecomesS
         EXPECT_EQ(header.stream_id, config.session_config.stream_id);
         EXPECT_EQ(header.generation, state.generation);
         EXPECT_FALSE(payload.empty());
+        lastSequence = header.sequence;
         receivedConfig = receivedConfig ||
                          (header.flags & transport::kVideoPacketCodecConfig) != 0;
         receivedKeyFrame = receivedKeyFrame ||
@@ -802,6 +814,14 @@ TEST(VideoFrameConsumerBackendTest, DrainsAsynchronousOutputAfterDisplayBecomesS
     }
     EXPECT_TRUE(receivedConfig);
     EXPECT_TRUE(receivedKeyFrame);
+
+    transport::VideoPacketHeader repeatedHeader;
+    std::vector<uint8_t> repeatedPayload;
+    ASSERT_TRUE(ReceiveVideoPacket(receiver.get(), &repeatedHeader, &repeatedPayload, &error))
+            << error;
+    EXPECT_EQ(repeatedHeader.generation, state.generation);
+    EXPECT_GT(repeatedHeader.sequence, lastSequence);
+    EXPECT_FALSE(repeatedPayload.empty());
 }
 
 }  // namespace

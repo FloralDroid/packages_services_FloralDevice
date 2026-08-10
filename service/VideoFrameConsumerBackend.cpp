@@ -42,6 +42,10 @@ namespace {
 
 using AidlFrameStatus = aidl::floral::device::display::FrameStatus;
 
+constexpr auto kStaticFrameInitialDelay = std::chrono::milliseconds(500);
+constexpr auto kStaticFrameRepeatInterval = std::chrono::seconds(1);
+constexpr auto kStaticFrameDrainPollInterval = std::chrono::milliseconds(100);
+
 uint32_t NextGeneration(uint32_t generation) {
     constexpr uint32_t kMaximumGeneration =
             static_cast<uint32_t>(std::numeric_limits<int32_t>::max());
@@ -135,6 +139,7 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
         if (existing != buffers_.end()) {
             session_->UnregisterBuffer(existing->second);
             buffers_.erase(existing);
+            ResetStaticFrameStateLocked();
         }
 
         uint64_t encoderBufferId = 0;
@@ -191,6 +196,10 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
         result.status = AidlFrameStatus::ACCEPTED;
         result.release_fence = std::move(copied.release_fence);
         ++pending_output_frames_;
+        last_source_frame_at_ = std::chrono::steady_clock::now();
+        last_static_repeat_at_ = {};
+        last_presentation_time_nanos_ = request.presentation_time_nanos;
+        static_repeat_started_ = false;
         output_condition_.notify_one();
         return result;
     }
@@ -345,6 +354,7 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
         if (reset_required_) {
             session_.reset();
             buffers_.clear();
+            ResetStaticFrameStateLocked();
             reset_required_ = false;
             next_reconnect_ = std::chrono::steady_clock::now() + config_.reconnect_interval;
         }
@@ -384,6 +394,7 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
         buffers_.clear();
         pending_output_frames_ = 0;
         next_frame_presentation_time_nanos_ = 0;
+        ResetStaticFrameStateLocked();
         last_connection_error_.clear();
         output_condition_.notify_one();
         const stream::VideoGeometry& geometry = sessionConfig.geometry;
@@ -419,15 +430,85 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
         pending_output_frames_ = completedFrames >= pending_output_frames_
                                          ? 0
                                          : pending_output_frames_ - completedFrames;
+        if (!static_repeat_started_ &&
+            session_->static_frame_repeat_mode() ==
+                    stream::codec::StaticFrameRepeatMode::kCodecManaged &&
+            last_source_frame_at_ != std::chrono::steady_clock::time_point{} &&
+            std::chrono::steady_clock::now() - last_source_frame_at_ >=
+                    kStaticFrameRepeatInterval &&
+            currentStats.unmatched_frame_timestamps > initialStats.unmatched_frame_timestamps) {
+            static_repeat_started_ = true;
+            LOG(INFO) << "video static frame repetition active for generation " << generation_
+                      << " (MediaCodec interval 1 s)";
+        }
         return madeProgress;
+    }
+
+    bool MaybeRepeatStaticFrameLocked(std::chrono::steady_clock::time_point now) {
+        if (session_ == nullptr || reset_required_ || !session_->transport_connected() ||
+            session_->static_frame_repeat_mode() !=
+                    stream::codec::StaticFrameRepeatMode::kBackendManaged ||
+            last_source_frame_at_ == std::chrono::steady_clock::time_point{} ||
+            pending_output_frames_ > 0) {
+            return true;
+        }
+
+        const auto sinceSourceFrame = now - last_source_frame_at_;
+        if (sinceSourceFrame < kStaticFrameInitialDelay) {
+            return true;
+        }
+        const auto repeatInterval =
+                last_static_repeat_at_ == std::chrono::steady_clock::time_point{}
+                        ? kStaticFrameInitialDelay
+                        : kStaticFrameRepeatInterval;
+        if (last_static_repeat_at_ != std::chrono::steady_clock::time_point{} &&
+            now - last_static_repeat_at_ < repeatInterval) {
+            return true;
+        }
+
+        constexpr int64_t kRepeatTimestampStepNanos =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(kStaticFrameRepeatInterval)
+                        .count();
+        if (last_presentation_time_nanos_ >
+            std::numeric_limits<int64_t>::max() - kRepeatTimestampStepNanos) {
+            MarkSessionForResetLocked("static frame presentation timestamp overflowed");
+            return false;
+        }
+        const int64_t monotonicNowNanos =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch())
+                        .count();
+        const int64_t presentationTimeNanos = std::max(
+                last_presentation_time_nanos_ + kRepeatTimestampStepNanos, monotonicNowNanos);
+        std::string error;
+        const stream::codec::FrameCopyResult repeated =
+                session_->RepeatLastFrame(presentationTimeNanos, &error);
+        if (!repeated.success) {
+            MarkSessionForResetLocked(error.empty() ? "static frame repetition failed" : error);
+            return false;
+        }
+        ++pending_output_frames_;
+        last_static_repeat_at_ = now;
+        last_presentation_time_nanos_ = presentationTimeNanos;
+        if (!static_repeat_started_) {
+            static_repeat_started_ = true;
+            LOG(INFO) << "video static frame repetition active for generation " << generation_
+                      << " (initial delay 500 ms, interval 1 s)";
+        }
+        return true;
+    }
+
+    void ResetStaticFrameStateLocked() {
+        last_source_frame_at_ = {};
+        last_static_repeat_at_ = {};
+        last_presentation_time_nanos_ = 0;
+        static_repeat_started_ = false;
     }
 
     void DrainOutputLoop() {
         std::unique_lock lock(mutex_);
         while (!output_worker_stopping_) {
             output_condition_.wait(lock, [this]() {
-                return output_worker_stopping_ ||
-                       (session_ != nullptr && !reset_required_ && pending_output_frames_ > 0);
+                return output_worker_stopping_ || (session_ != nullptr && !reset_required_);
             });
             if (output_worker_stopping_) {
                 return;
@@ -437,10 +518,23 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
                 continue;
             }
 
+            if (!MaybeRepeatStaticFrameLocked(std::chrono::steady_clock::now())) {
+                continue;
+            }
+            const bool codecManagedRepeat = session_->static_frame_repeat_mode() ==
+                                            stream::codec::StaticFrameRepeatMode::kCodecManaged;
+            if (pending_output_frames_ == 0 && !codecManagedRepeat) {
+                output_condition_.wait_for(lock, kStaticFrameDrainPollInterval);
+                continue;
+            }
+
             const bool madeProgress = DrainOutputLocked();
             if (session_ != nullptr && !reset_required_ && pending_output_frames_ > 0 &&
                 !madeProgress) {
                 output_condition_.wait_for(lock, config_.output_drain_retry_interval);
+            } else if (session_ != nullptr && !reset_required_ && codecManagedRepeat &&
+                       pending_output_frames_ == 0 && !madeProgress) {
+                output_condition_.wait_for(lock, kStaticFrameDrainPollInterval);
             }
         }
     }
@@ -514,10 +608,13 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
     bool reset_required_ = false;
     uint64_t pending_output_frames_ = 0;
     uint64_t next_frame_presentation_time_nanos_ = 0;
+    std::chrono::steady_clock::time_point last_source_frame_at_;
+    std::chrono::steady_clock::time_point last_static_repeat_at_;
+    int64_t last_presentation_time_nanos_ = 0;
+    bool static_repeat_started_ = false;
 
-    // MediaCodec output becomes available asynchronously after SubmitFrame.
-    // Keep draining while submitted frames are outstanding, including when the
-    // display stops producing new frames because its contents are static.
+    // MediaCodec output becomes available asynchronously after SubmitFrame and
+    // can also emit codec-managed repeats without a pending display frame.
     std::condition_variable output_condition_;
     bool output_worker_stopping_ = false;
     std::thread output_worker_;
