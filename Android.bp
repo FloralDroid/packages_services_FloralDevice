@@ -218,6 +218,36 @@ cc_defaults {
 }
 
 cc_library_static {
+    name: "libfloral_device_profile",
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    cpp_std: "c++17",
+    vendor_available: true,
+    recovery_available: true,
+    ramdisk_available: true,
+    vendor_ramdisk_available: true,
+    host_supported: true,
+    bootstrap: true,
+    srcs: ["profile/DeviceProfile.cpp"],
+    export_include_dirs: ["include"],
+}
+
+cc_test_host {
+    name: "floral_device_profile_tests_host",
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Wextra",
+    ],
+    cpp_std: "c++17",
+    srcs: ["tests/DeviceProfileTest.cpp"],
+    static_libs: ["libfloral_device_profile"],
+}
+
+cc_library_static {
     name: "libfloral_device_simulation_common",
     defaults: ["floral_device_simulation_defaults"],
     vendor_available: true,
