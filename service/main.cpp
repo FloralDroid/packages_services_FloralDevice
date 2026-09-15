@@ -90,10 +90,8 @@ std::optional<floral::device::service::VideoFrameConsumerBackendConfig> LoadConf
     } else if (encoderBackend == "vaapi") {
         config.session_config.encoder.backend =
                 floral::stream::codec::EncoderBackendType::kFfmpegVaapi;
-        const std::string gbmDevice =
-                android::base::GetProperty("gralloc.gbm.device", kDefaultVaDevicePath);
         config.session_config.encoder.va_device_path =
-                android::base::GetProperty("ro.boot.floral_vaapi_device", gbmDevice);
+                android::base::GetProperty("ro.boot.floral_vaapi_device", kDefaultVaDevicePath);
     } else {
         LOG(ERROR) << "unsupported ro.boot.floral_video_encoder value: " << encoderBackend;
         return std::nullopt;
