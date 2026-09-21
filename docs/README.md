@@ -8,8 +8,8 @@ or hardware encoding and sends encoded access units to a host Unix socket.
 
 ## Modules
 
-- `libfloral_stream_codec` provides one encoder-session interface with two
-  explicit backends. The software backend selects
+- `libfloral_stream_codec` provides one encoder-session interface with explicit
+  software, VA-API, Venus, and automatic selection modes. The software backend selects
   `OMX.google.h264.encoder` and blits cached AHardwareBuffers into its
   MediaCodec input surface. The x86_64 VA-API backend exports buffers as DRM
   PRIME, converts them to NV12 with VA video processing, and encodes with
@@ -87,10 +87,11 @@ protected-buffer composition on those recording displays.
 
 ## Video backend
 
-`ro.boot.floral_video_encoder` selects the encoder. `software` is the default;
-`vaapi` selects the FFmpeg hardware backend without automatic software
-fallback. `ro.boot.floral_vaapi_device` changes the default
-`/dev/dri/renderD128` device.
+`ro.boot.floral_video_encoder` selects the encoder. `auto` is the default: it
+tries VA-API before software on x86_64, and Qualcomm Venus before software on
+ARM. `venus`, `vaapi`, and `software` force the corresponding backend and do
+not silently fall back. When `ro.boot.floral_vaapi_device` is unset, available
+render nodes are probed; setting it restricts VA-API to that path.
 
 MediaCodec updates bitrate in place. VA-API drains pending packets and reopens
 the codec at the new bitrate while retaining registered display buffers and the

@@ -256,8 +256,10 @@ class VideoFrameConsumerBackend final : public display::FrameConsumerBackend,
             return true;
         }
         if ((update.fields & kVideoEncoderConfigBackend) != 0 &&
+            update.backend != stream::codec::EncoderBackendType::kAuto &&
             update.backend != stream::codec::EncoderBackendType::kMediaCodecSoftware &&
-            update.backend != stream::codec::EncoderBackendType::kFfmpegVaapi) {
+            update.backend != stream::codec::EncoderBackendType::kFfmpegVaapi &&
+            update.backend != stream::codec::EncoderBackendType::kMediaCodecVenus) {
             FillRuntimeStateLocked(state);
             *result = VideoEncoderConfigResult::kUnsupported;
             return true;

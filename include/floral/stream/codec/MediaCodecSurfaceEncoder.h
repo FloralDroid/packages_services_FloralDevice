@@ -27,6 +27,7 @@
 namespace floral::stream::codec {
 
 inline constexpr char kSoftwareAvcCodecName[] = "OMX.google.h264.encoder";
+inline constexpr char kVenusAvcCodecName[] = "c2.floral.avc.encoder";
 
 class MediaCodecSurfaceEncoder {
   public:

@@ -43,7 +43,7 @@ bool SetError(std::string* error, const char* operation, media_status_t status) 
 bool ValidateConfig(const EncoderConfig& config, std::string* error) {
     if (config.mime != "video/avc") {
         if (error != nullptr) {
-            *error = "the MediaCodec software backend only supports video/avc";
+            *error = "the MediaCodec encoder backend only supports video/avc";
         }
         return false;
     }
@@ -75,11 +75,30 @@ std::unique_ptr<MediaCodecSurfaceEncoder> MediaCodecSurfaceEncoder::Create(
     }
 
     auto encoder = std::unique_ptr<MediaCodecSurfaceEncoder>(new MediaCodecSurfaceEncoder(config));
-    encoder->codec_ = AMediaCodec_createCodecByName(kSoftwareAvcCodecName);
+    const char* requestedName = nullptr;
+    switch (config.backend) {
+        case EncoderBackendType::kMediaCodecSoftware:
+            requestedName = kSoftwareAvcCodecName;
+            encoder->codec_ = AMediaCodec_createCodecByName(requestedName);
+            break;
+        case EncoderBackendType::kMediaCodecVenus:
+            requestedName = kVenusAvcCodecName;
+            encoder->codec_ = AMediaCodec_createCodecByName(requestedName);
+            break;
+        case EncoderBackendType::kAuto:
+            encoder->codec_ = AMediaCodec_createEncoderByType(config.mime.c_str());
+            break;
+        case EncoderBackendType::kFfmpegVaapi:
+            if (error != nullptr) {
+                *error = "the VA-API backend is not a MediaCodec encoder";
+            }
+            return nullptr;
+    }
     if (encoder->codec_ == nullptr) {
         if (error != nullptr) {
-            *error = std::string("MediaCodec software encoder is unavailable: ") +
-                     kSoftwareAvcCodecName;
+            *error = requestedName == nullptr
+                             ? "no MediaCodec AVC encoder is available"
+                             : std::string("MediaCodec encoder is unavailable: ") + requestedName;
         }
         return nullptr;
     }

@@ -300,14 +300,16 @@ TEST(MediaCodecSurfaceEncoderTest, RejectsInvalidConfigurationBeforeCodecCreatio
 
 TEST(MediaCodecSurfaceEncoderTest, RejectsUnsupportedMimeBeforeCodecCreation) {
     EncoderConfig config;
+    config.backend = EncoderBackendType::kMediaCodecSoftware;
     config.mime = "video/hevc";
     std::string error;
     EXPECT_EQ(MediaCodecSurfaceEncoder::Create(config, &error), nullptr);
-    EXPECT_EQ(error, "the MediaCodec software backend only supports video/avc");
+    EXPECT_EQ(error, "the MediaCodec encoder backend only supports video/avc");
 }
 
 TEST(MediaCodecSurfaceEncoderTest, Encodes1080p60SurfaceFramesAndChangesBitrate) {
     EncoderConfig config;
+    config.backend = EncoderBackendType::kMediaCodecSoftware;
     config.width = 1920;
     config.height = 1080;
     config.bitrate_bps = 8'000'000;
@@ -392,6 +394,7 @@ TEST(EncoderSessionTest, RejectsMismatchedCodedGeometryBeforeCodecCreation) {
 
 TEST(EncoderSessionTest, EncodesTransportedGuestBufferAndPreservesFenceOwnership) {
     EncoderConfig config;
+    config.backend = EncoderBackendType::kMediaCodecSoftware;
     config.width = 640;
     config.height = 360;
     config.bitrate_bps = 2'000'000;
@@ -494,6 +497,7 @@ TEST(EncoderSessionTest, EncodesTransportedGuestBufferAndPreservesFenceOwnership
 
 TEST(EncoderSessionTest, MigratesEglContextAcrossLiveCallerThreads) {
     EncoderConfig config;
+    config.backend = EncoderBackendType::kMediaCodecSoftware;
     config.width = 640;
     config.height = 360;
     config.bitrate_bps = 2'000'000;
@@ -663,6 +667,7 @@ TEST(VideoStreamSessionTest, SendsEncodedFramesWithMatchedSubmissionTimestamps) 
     android::base::unique_fd receiver(sockets[1]);
 
     session::VideoStreamSessionConfig config;
+    config.encoder.backend = EncoderBackendType::kMediaCodecSoftware;
     config.encoder.width = 320;
     config.encoder.height = 180;
     config.encoder.bitrate_bps = 1'000'000;
@@ -732,6 +737,7 @@ TEST(VideoStreamSessionTest, SendsEncodedFramesWithMatchedSubmissionTimestamps) 
 
 TEST(VideoFrameConsumerBackendTest, RepeatsEncodedOutputAfterDisplayBecomesStatic) {
     ::floral::device::service::VideoFrameConsumerBackendConfig config;
+    config.session_config.encoder.backend = EncoderBackendType::kMediaCodecSoftware;
     config.display_id = 1;
     config.video_socket_path = "/data/local/tmp/floral-video-backend-test-" +
                                std::to_string(getpid()) + ".sock";

@@ -58,7 +58,6 @@ namespace {
 constexpr char kDefaultVideoSocketPath[] = "/ipc/floral_stream/video.sock";
 constexpr char kDefaultAudioSocketPath[] = "/ipc/floral_stream/audio.sock";
 constexpr char kDefaultControlSocketPath[] = "/ipc/floral_stream/control.sock";
-constexpr char kDefaultVaDevicePath[] = "/dev/dri/renderD128";
 
 uint32_t BoundedProperty(const char* name, uint32_t defaultValue, uint32_t minimum,
                          uint32_t maximum) {
@@ -83,15 +82,22 @@ std::optional<floral::device::service::VideoFrameConsumerBackendConfig> LoadConf
             BoundedProperty("ro.boot.floral_video_bitrate", 8'000'000, 100'000, 100'000'000);
     config.session_config.encoder.i_frame_interval_seconds = 1;
     const std::string encoderBackend =
-            android::base::GetProperty("ro.boot.floral_video_encoder", "software");
-    if (encoderBackend == "software") {
+            android::base::GetProperty("ro.boot.floral_video_encoder", "auto");
+    if (encoderBackend == "auto") {
+        config.session_config.encoder.backend = floral::stream::codec::EncoderBackendType::kAuto;
+        config.session_config.encoder.va_device_path =
+                android::base::GetProperty("ro.boot.floral_vaapi_device", "");
+    } else if (encoderBackend == "software") {
         config.session_config.encoder.backend =
                 floral::stream::codec::EncoderBackendType::kMediaCodecSoftware;
+    } else if (encoderBackend == "venus") {
+        config.session_config.encoder.backend =
+                floral::stream::codec::EncoderBackendType::kMediaCodecVenus;
     } else if (encoderBackend == "vaapi") {
         config.session_config.encoder.backend =
                 floral::stream::codec::EncoderBackendType::kFfmpegVaapi;
         config.session_config.encoder.va_device_path =
-                android::base::GetProperty("ro.boot.floral_vaapi_device", kDefaultVaDevicePath);
+                android::base::GetProperty("ro.boot.floral_vaapi_device", "");
     } else {
         LOG(ERROR) << "unsupported ro.boot.floral_video_encoder value: " << encoderBackend;
         return std::nullopt;

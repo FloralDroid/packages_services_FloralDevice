@@ -92,7 +92,7 @@ payload is:
 | 0 | 8 | Target display id |
 | 8 | 4 | Stream id |
 | 12 | 4 | Update-field mask |
-| 16 | 4 | Encoder backend: `0` MediaCodec software, `1` FFmpeg VA-API |
+| 16 | 4 | Encoder backend: `0` MediaCodec software, `1` FFmpeg VA-API, `2` automatic, `3` MediaCodec Venus |
 | 20 | 4 | Codec id: `1` H.264 |
 | 24 | 4 | Coded width |
 | 28 | 4 | Coded height |

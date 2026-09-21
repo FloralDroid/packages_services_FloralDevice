@@ -23,10 +23,71 @@
 #include "FfmpegVaapiEncoderBackend.h"
 #endif
 
+#include <android-base/logging.h>
+
+#include <dirent.h>
+#include <algorithm>
+#include <cstring>
 #include <utility>
+#include <vector>
 
 namespace floral::stream::codec {
 namespace {
+
+#if defined(__x86_64__)
+bool IsRenderNode(const char* name) {
+    constexpr char kPrefix[] = "renderD";
+    constexpr size_t kPrefixLength = sizeof(kPrefix) - 1;
+    if (std::strncmp(name, kPrefix, kPrefixLength) != 0 || name[kPrefixLength] == '\0') {
+        return false;
+    }
+    for (const char* digit = name + kPrefixLength; *digit != '\0'; ++digit) {
+        if (*digit < '0' || *digit > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<std::string> GetVaapiDevicePaths(const std::string& configuredPath) {
+    if (!configuredPath.empty()) {
+        return {configuredPath};
+    }
+    std::vector<std::string> paths;
+    DIR* directory = opendir("/dev/dri");
+    if (directory == nullptr) {
+        return paths;
+    }
+    while (dirent* entry = readdir(directory)) {
+        if (IsRenderNode(entry->d_name)) {
+            paths.emplace_back(std::string("/dev/dri/") + entry->d_name);
+        }
+    }
+    closedir(directory);
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
+std::unique_ptr<EncoderBackend> CreateVaapiBackend(const EncoderConfig& config,
+                                                   const VideoGeometry& geometry,
+                                                   std::string* error) {
+    std::string lastError = "no VA-API render device is available";
+    for (const std::string& path : GetVaapiDevicePaths(config.va_device_path)) {
+        EncoderConfig candidate = config;
+        candidate.va_device_path = path;
+        std::unique_ptr<FfmpegVaapiEncoderBackend> backend =
+                FfmpegVaapiEncoderBackend::Create(candidate, geometry, path, &lastError);
+        if (backend != nullptr) {
+            LOG(INFO) << "selected VA-API encoder device " << path;
+            return backend;
+        }
+    }
+    if (error != nullptr) {
+        *error = lastError;
+    }
+    return nullptr;
+}
+#endif
 
 class MediaCodecEncoderBackend final : public EncoderBackend {
   public:
@@ -130,14 +191,51 @@ std::unique_ptr<EncoderSession> EncoderSession::Create(const EncoderConfig& conf
         return nullptr;
     }
     std::unique_ptr<EncoderBackend> backend;
+    const auto createMediaCodec = [&](EncoderBackendType type, std::string* backendError) {
+        EncoderConfig candidate = config;
+        candidate.backend = type;
+        return MediaCodecEncoderBackend::Create(candidate, geometry, backendError);
+    };
     switch (config.backend) {
+        case EncoderBackendType::kAuto:
+#if defined(__x86_64__)
+        {
+            std::string vaapiError;
+            backend = CreateVaapiBackend(config, geometry, &vaapiError);
+            if (backend == nullptr) {
+                LOG(WARNING) << "automatic VA-API encoder selection failed: " << vaapiError
+                             << "; trying the software encoder";
+            }
+        }
+#elif defined(__aarch64__) || defined(__arm__)
+        {
+            std::string venusError;
+            backend = createMediaCodec(EncoderBackendType::kMediaCodecVenus, &venusError);
+            if (backend == nullptr) {
+                LOG(WARNING) << "automatic Venus encoder selection failed: " << venusError
+                             << "; trying the software encoder";
+            }
+        }
+#endif
+            if (backend == nullptr) {
+                backend = createMediaCodec(EncoderBackendType::kMediaCodecSoftware, error);
+            }
+            break;
         case EncoderBackendType::kMediaCodecSoftware:
-            backend = MediaCodecEncoderBackend::Create(config, geometry, error);
+            backend = createMediaCodec(EncoderBackendType::kMediaCodecSoftware, error);
+            break;
+        case EncoderBackendType::kMediaCodecVenus:
+#if defined(__aarch64__) || defined(__arm__)
+            backend = createMediaCodec(EncoderBackendType::kMediaCodecVenus, error);
+#else
+            if (error != nullptr) {
+                *error = "the Qualcomm Venus backend is only built for ARM";
+            }
+#endif
             break;
         case EncoderBackendType::kFfmpegVaapi:
 #if defined(__x86_64__)
-            backend = FfmpegVaapiEncoderBackend::Create(config, geometry, config.va_device_path,
-                                                        error);
+            backend = CreateVaapiBackend(config, geometry, error);
 #else
             if (error != nullptr) {
                 *error = "the FFmpeg VA-API backend is only built for x86_64";

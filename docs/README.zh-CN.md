@@ -8,7 +8,8 @@ Unix Socket。
 
 ## 模块
 
-- `libfloral_stream_codec` 提供统一的编码器会话接口和两个明确区分的后端。
+- `libfloral_stream_codec` 提供统一的编码器会话接口，以及明确区分的软件、VA-API、
+  Venus 和自动选择模式。
   软件后端选择 `OMX.google.h264.encoder`，将缓存的 AHardwareBuffer 绘制到
   MediaCodec 输入 Surface。x86_64 VA-API 后端把缓冲区导出为 DRM PRIME，
   使用 VA 视频处理转换为 NV12，再通过 FFmpeg `h264_vaapi` 编码。
@@ -74,9 +75,10 @@ FSV2 头中携带明确的旋转角度；Android 输入坐标始终使用逻辑�
 
 ## 视频后端
 
-`ro.boot.floral_video_encoder` 用于选择编码器。默认值为 `software`；设为
-`vaapi` 时选择 FFmpeg 硬件后端，且不会自动回退到软件编码。
-`ro.boot.floral_vaapi_device` 可修改默认的 `/dev/dri/renderD128` 设备。
+`ro.boot.floral_video_encoder` 用于选择编码器，默认值为 `auto`：x86_64 依次
+尝试 VA-API、软件编码，ARM 依次尝试 Qualcomm Venus、软件编码。`venus`、
+`vaapi` 和 `software` 会强制对应后端，失败时不会静默回退。未设置
+`ro.boot.floral_vaapi_device` 时探测可用的 render 节点；设置后只使用指定路径。
 
 MediaCodec 可以原地更新码率。VA-API 在码率变化时先排空待处理数据包，再使用
 新码率重新打开编码器，同时保留已注册的显示缓冲区和 VA 设备。
