@@ -1,0 +1,4 @@
+# AudioFlinger passes its shared control/data regions to classified app clients.
+# Keep the MLS exception on these objects, not on either process. Existing app
+# rules allow only { read write getattr map } on the received FD, not path opens.
+typeattribute audioserver_tmpfs mlstrustedobject;

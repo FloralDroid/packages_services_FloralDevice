@@ -17,9 +17,12 @@
 package com.floraldroid.input;
 
 import android.content.Context;
+import android.net.Credentials;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
+import android.os.Process;
+import android.os.SELinux;
 import android.os.SystemClock;
 import android.os.SystemProperties;
 import android.system.ErrnoException;
@@ -49,6 +52,7 @@ final class OperationServer
 
   private DataOutputStream activeOutput;
   private LocalSocket activeSocket;
+  private boolean strict;
 
   OperationServer(Context context) {
     socketPath = SystemProperties.get("ro.boot.floral_operate_socket", DEFAULT_SOCKET_PATH);
@@ -58,6 +62,25 @@ final class OperationServer
   }
 
   void start() {
+    final String mode = SystemProperties.get("ro.boot.floral_input_strict", "");
+    try {
+      InputSecurityPolicy.SelinuxState state = InputSecurityPolicy.SelinuxState.UNKNOWN;
+      if (mode.isEmpty() || mode.equals("1")) {
+        state = SelinuxStateReader.read();
+      }
+      strict = InputSecurityPolicy.resolveStrictMode(mode, state);
+      if (strict
+          && (!DEFAULT_SOCKET_PATH.equals(socketPath)
+              || !"u:r:floral_input:s0".equals(SELinux.getContext()))) {
+        throw new IllegalArgumentException("Strict input requires its dedicated domain and endpoint");
+      }
+    } catch (IllegalArgumentException | IOException | LinkageError error) {
+      Log.e(TAG, "Input endpoint disabled: invalid security configuration", error);
+      return;
+    }
+    Log.i(TAG, strict ? "Strict host input authentication enabled"
+        : "Development input mode: " + (mode.equals("0") ? "explicit flag"
+            : "confirmed disabled/permissive SELinux"));
     resolver.start();
     final Thread thread = new Thread(this, "floral-input-operation");
     thread.start();
@@ -67,11 +90,14 @@ final class OperationServer
   public void run() {
     boolean waitingLogged = false;
     while (true) {
-      try (FilesystemSocketServer server = FilesystemSocketServer.create(socketPath)) {
+      try (FilesystemSocketServer server = FilesystemSocketServer.create(socketPath, strict)) {
         waitingLogged = false;
         Log.i(TAG, "Listening for host operation connections: " + socketPath);
         while (true) {
           try (LocalSocket socket = server.accept()) {
+            if (strict && !authenticateHost(socket)) {
+              continue;
+            }
             Log.i(TAG, "Accepted host operation connection: " + socketPath);
             processConnection(socket);
           } finally {
@@ -90,6 +116,20 @@ final class OperationServer
       }
       SystemClock.sleep(RECONNECT_DELAY_MILLIS);
     }
+  }
+
+  private static boolean authenticateHost(LocalSocket socket) {
+    try {
+      final Credentials peer = socket.getPeerCredentials();
+      if (peer != null
+          && InputSecurityPolicy.isTrustedHostPeer(peer.getPid(), peer.getUid(), peer.getGid())) {
+        return true;
+      }
+    } catch (IOException error) {
+      Log.w(TAG, "Cannot obtain host input peer credentials", error);
+    }
+    Log.w(TAG, "Rejected non-host input connection");
+    return false;
   }
 
   @Override
@@ -237,20 +277,32 @@ final class OperationServer
   }
 
   private static final class FilesystemSocketServer implements AutoCloseable {
-    private static final int SOCKET_MODE = 0660;
-
     private final String path;
     private final LocalSocket boundSocket;
     private final LocalServerSocket serverSocket;
     private final long pathDevice;
     private final long pathInode;
 
-    static FilesystemSocketServer create(String path) throws IOException {
-      removeSocketNode(path);
+    static FilesystemSocketServer create(String path, boolean strict) throws IOException {
+      if (strict) {
+        try {
+          final StructStat directory = Os.lstat("/ipc/floral_stream");
+          InputSecurityPolicy.requireTrustedDirectory(
+              OsConstants.S_ISDIR(directory.st_mode), directory.st_uid, directory.st_gid,
+              directory.st_mode, SELinux.getFileContext("/ipc/floral_stream"));
+        } catch (IllegalArgumentException error) {
+          throw new IOException(error.getMessage(), error);
+        } catch (ErrnoException error) {
+          throw error.rethrowAsIOException();
+        }
+      }
+      removeSocketNode(path, strict);
       final LocalSocket boundSocket = new LocalSocket(LocalSocket.SOCKET_STREAM);
+      StructStat created = null;
       try {
         boundSocket.bind(new LocalSocketAddress(path, LocalSocketAddress.Namespace.FILESYSTEM));
-        Os.chmod(path, SOCKET_MODE);
+        created = Os.lstat(path);
+        Os.chmod(path, strict ? 0600 : 0660);
         final StructStat status = Os.lstat(path);
         return new FilesystemSocketServer(
             path,
@@ -259,10 +311,10 @@ final class OperationServer
             status.st_dev,
             status.st_ino);
       } catch (ErrnoException error) {
-        closeAfterCreateFailure(path, boundSocket);
+        closeAfterCreateFailure(path, boundSocket, created);
         throw error.rethrowAsIOException();
       } catch (IOException error) {
-        closeAfterCreateFailure(path, boundSocket);
+        closeAfterCreateFailure(path, boundSocket, created);
         throw error;
       }
     }
@@ -311,18 +363,20 @@ final class OperationServer
       }
     }
 
-    private static void closeAfterCreateFailure(String path, LocalSocket socket) {
+    private static void closeAfterCreateFailure(String path, LocalSocket socket, StructStat created) {
       try {
         socket.close();
       } catch (IOException ignored) {
       }
-      try {
-        removeSocketNode(path);
-      } catch (IOException ignored) {
+      if (created != null) {
+        try {
+          removeOwnedSocketNode(path, created.st_dev, created.st_ino);
+        } catch (IOException ignored) {
+        }
       }
     }
 
-    private static void removeSocketNode(String path) throws IOException {
+    private static void removeSocketNode(String path, boolean strict) throws IOException {
       final StructStat status;
       try {
         status = Os.lstat(path);
@@ -334,6 +388,9 @@ final class OperationServer
       }
       if (!OsConstants.S_ISSOCK(status.st_mode)) {
         throw new IOException("socket path already exists and is not a Unix socket");
+      }
+      if (strict && status.st_uid != Process.myUid()) {
+        throw new IOException("refusing to remove a socket owned by another UID");
       }
       boolean active = false;
       try (LocalSocket probe = new LocalSocket(LocalSocket.SOCKET_STREAM)) {

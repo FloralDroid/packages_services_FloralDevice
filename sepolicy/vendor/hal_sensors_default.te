@@ -1,0 +1,4 @@
+# SensorService creates the event/wake-lock FMQs in system_server. These are
+# separate from FloralDevice's own queues; synchronized readers update pointers
+# and event words too. Existing Binder rules authorize use of the passed FD.
+allow hal_sensors_default system_server_tmpfs:file { read write getattr map };

@@ -1,1 +1,2 @@
 ro.boot.floral_    u:object_r:vendor_floral_config_prop:s0
+ro.boot.floral_input_strict u:object_r:vendor_floral_input_security_prop:s0 exact bool

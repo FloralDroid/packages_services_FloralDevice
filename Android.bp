@@ -435,6 +435,35 @@ cc_library_static {
     export_include_dirs: ["include"],
 }
 
+cc_library_shared {
+    name: "libfloral_input_security",
+    srcs: [
+        "input/jni/SelinuxState.cpp",
+        "input/jni/InputSecurityJni.cpp",
+    ],
+    header_libs: ["jni_headers"],
+    shared_libs: ["libselinux"],
+    cflags: ["-Wall", "-Werror", "-Wextra"],
+    cpp_std: "c++17",
+}
+
+cc_test_host {
+    name: "floral_input_selinux_state_tests_host",
+    srcs: ["tests/SelinuxStateTest.cpp", "input/jni/SelinuxState.cpp"],
+    local_include_dirs: ["input/jni"],
+    shared_libs: ["libselinux"],
+    cflags: ["-Wall", "-Werror", "-Wextra"],
+    cpp_std: "c++17",
+}
+
+prebuilt_etc {
+    name: "floral_device_platform_init",
+    system_ext_specific: true,
+    sub_dir: "init",
+    filename: "floral-device-platform.rc",
+    src: "service/floral-device-platform.rc",
+}
+
 android_app {
     name: "FloralInputService",
     srcs: [
@@ -444,6 +473,7 @@ android_app {
     certificate: "platform",
     platform_apis: true,
     privileged: true,
+    jni_libs: ["libfloral_input_security"],
     optimize: {
         enabled: false,
     },
@@ -453,6 +483,8 @@ java_test_host {
     name: "floral_input_protocol_tests_host",
     srcs: [
         "input/java/com/floraldroid/input/InputStateMachine.java",
+        "input/java/com/floraldroid/input/InputSecurityPolicy.java",
+        "input/java/com/floraldroid/input/SelinuxStateReader.java",
         "input/java/com/floraldroid/input/OperationProtocol.java",
         "tests/java/**/*.java",
     ],
@@ -657,7 +689,7 @@ cc_binary {
     },
     init_rc: ["service/floral-device.rc"],
     vintf_fragments: ["service/floral-device.xml"],
-    required: ["FloralInputService"],
+    required: ["FloralInputService", "floral_device_platform_init"],
 }
 
 cc_test {

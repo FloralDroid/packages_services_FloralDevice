@@ -106,6 +106,10 @@ bind the host transport directory to `/ipc/floral_stream`. The corresponding
 `ro.boot.floral_*_socket` properties change their paths. A valid full topology
 snapshot owns the external displays until another full snapshot replaces it.
 
+The input endpoint's strict peer checks and development compatibility are
+documented in [Input broker security](INPUT_SECURITY.md). Strict mode pins its
+path and requires a private per-instance host transport directory.
+
 ```text
 -v /root/floral/instance-01:/ipc/floral_stream:rw
 ```

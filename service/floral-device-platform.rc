@@ -1,0 +1,7 @@
+# Must be installed outside /vendor and /odm: vendor_init cannot create entries
+# in the generic tmpfs parent. Lupine supplies a private per-run bind mount here.
+on early-init
+    # Match the dynamic app UID/native system service requirements. SELinux
+    # restricts guest writers; a private host ancestor protects the host path.
+    mkdir /ipc/floral_stream 0773 root root
+    restorecon_recursive /ipc/floral_stream

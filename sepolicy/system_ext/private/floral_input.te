@@ -1,0 +1,18 @@
+typeattribute floral_input coredomain;
+app_domain(floral_input)
+
+# Keep the ordinary app API lookup baseline needed by ActivityThread. InputManager
+# and DisplayManager live in system_server; no platform_app-wide service lookup,
+# network, Bluetooth, media-store or installer grants are needed.
+binder_use(floral_input)
+binder_call(floral_input, system_server)
+binder_call(system_server, floral_input)
+allow floral_input { app_api_service input_service display_service }:service_manager find;
+allow floral_input privapp_data_file:dir create_dir_perms;
+allow floral_input privapp_data_file:file create_file_perms;
+
+# Query enforcement without granting policy reads or SELinux control operations.
+allow floral_input selinuxfs:file { open read };
+
+# This privileged input broker does not execute downloaded code from its data.
+neverallow floral_input privapp_data_file:file { execute execute_no_trans };

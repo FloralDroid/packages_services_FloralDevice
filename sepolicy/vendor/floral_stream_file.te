@@ -1,6 +1,6 @@
 type floral_stream_file, file_type;
 
-# The platform input application and vendor daemon share only the directory.
+# The dedicated input application and vendor daemon share only the directory.
 # operate.sock remains a core-owned socket while the other endpoints retain the
 # vendor directory type, preserving the Treble socket boundary.
 type floral_input_socket_file, file_type, coredomain_socket;
@@ -9,8 +9,14 @@ type floral_input_socket_file, file_type, coredomain_socket;
 allow init floral_stream_file:dir search;
 allow init floral_stream_file:file r_file_perms;
 
-allow { platform_app priv_app } floral_stream_file:dir rw_dir_perms;
-type_transition platform_app floral_stream_file:sock_file floral_input_socket_file "operate.sock";
-type_transition priv_app floral_stream_file:sock_file floral_input_socket_file "operate.sock";
-allow { platform_app priv_app } floral_input_socket_file:sock_file create_file_perms;
-get_prop({ platform_app priv_app }, vendor_floral_config_prop)
+allow floral_input floral_stream_file:dir { search getattr write add_name remove_name };
+type_transition floral_input floral_stream_file:sock_file floral_input_socket_file "operate.sock";
+allow floral_input floral_input_socket_file:sock_file { create getattr setattr unlink write };
+get_prop(floral_input, vendor_floral_config_prop)
+get_prop(floral_input, vendor_floral_input_security_prop)
+
+# Guard against reintroducing broad endpoint ownership via another policy file.
+neverallow { appdomain -floral_input } floral_stream_file:dir { write add_name remove_name };
+neverallow { domain -floral_input -init -vendor_init } floral_input_socket_file:sock_file
+    { create setattr unlink link rename write };
+neverallow { appdomain -floral_input } floral_input:unix_stream_socket connectto;

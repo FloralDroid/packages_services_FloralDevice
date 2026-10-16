@@ -1,1 +1,2 @@
 vendor_public_prop(vendor_floral_config_prop)
+vendor_restricted_prop(vendor_floral_input_security_prop)

@@ -1,0 +1,4 @@
+# Platform signer AND privileged package identity, not package name alone.
+# Like a native broker, use s0 for the host-shared s0 transport. Do not grant
+# mlstrustedsubject to an app or bypass MLS/MCS for other applications.
+user=_app seinfo=platform isPrivApp=true name=com.floraldroid.input domain=floral_input type=privapp_data_file levelFrom=none

@@ -1,0 +1,3 @@
+# Export only the domain identifier so the component's vendor transport policy
+# can grant access without depending on generic platform_app or priv_app.
+type floral_input, domain;

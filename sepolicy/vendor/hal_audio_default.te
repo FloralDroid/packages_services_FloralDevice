@@ -2,3 +2,12 @@ binder_use(hal_audio_default)
 allow hal_audio_default floral_device_service:service_manager find;
 binder_call(hal_audio_default, floral_device)
 binder_call(floral_device, hal_audio_default)
+
+# The HIDL stream wrapper creates its command/data/status FMQs in the audio HAL
+# before returning their descriptors to audioserver. Do not use generic tmpfs or
+# grant the HAL access to audioserver-created regions for this direction.
+type hal_audio_default_tmpfs, file_type;
+tmpfs_domain(hal_audio_default)
+# Synchronized queue consumers also update read pointers and event words.
+# Existing audio Binder rules already authorize use of the returned FDs.
+allow audioserver hal_audio_default_tmpfs:file { read write getattr map };

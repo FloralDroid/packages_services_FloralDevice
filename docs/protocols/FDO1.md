@@ -5,7 +5,9 @@ The operation channel is a separate bidirectional Unix `SOCK_STREAM` at
 such as touch, keyboard, mouse, gestures, and explicit display operations. The
 container listens and the host connects. This is separate from FHC1 so a slow
 configuration request cannot head-of-line block high-rate input. The container
-path can be overridden with `ro.boot.floral_operate_socket`.
+path can be overridden with `ro.boot.floral_operate_socket` in development mode.
+Strict mode pins this endpoint and authenticates kernel peer credentials before
+reading the header; see [Input broker security](../INPUT_SECURITY.md).
 
 Every message starts with a fixed 24-byte big-endian header:
 
